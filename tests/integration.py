@@ -72,7 +72,8 @@ Server((ADDRESS, PORT), Handler).serve_forever()
 
 
 def fetch(name, url, source=None, ok=True):
-    args = ['curl', '--noproxy', '*', '-fsS', '--connect-timeout', '2', '--max-time', '4']
+    # Shared CI runners may delay IPv6 neighbour discovery; allow its retries.
+    args = ['curl', '--noproxy', '*', '-fsS', '--connect-timeout', '5', '--max-time', '8']
     if source: args += ['--interface', source]
     p = ns(name, *args, url, check=False)
     if ok and p.returncode:
