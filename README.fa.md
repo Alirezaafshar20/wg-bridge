@@ -2,7 +2,7 @@
 
 [English](README.md) | **فارسی**
 
-[![Tests](https://github.com/Alirezaafshar20/wg-bridge/actions/workflows/test.yml/badge.svg)](https://github.com/Alirezaafshar20/wg-bridge/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Tests](https://github.com/itsalirezaw/wg-bridge/actions/workflows/test.yml/badge.svg)](https://github.com/itsalirezaw/wg-bridge/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 تانل مسیریابی‌شدهٔ WireGuard بین سرور ورودی ایران و کلاینت خروجی خارج. یک جفت Peer، ترافیک خروجی سرویس‌ها و پنل‌های مستقر روی سرور ایران را منتقل می‌کند.
 
@@ -21,7 +21,7 @@ apt-get update && apt-get install -y curl ca-certificates
 ## Install
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Alirezaafshar20/wg-bridge/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/itsalirezaw/wg-bridge/main/install.sh)
 ```
 
 ## پیکربندی
@@ -44,7 +44,7 @@ wg-bridge doctor
 ## ارتقا
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Alirezaafshar20/wg-bridge/main/install.sh) --upgrade
+bash <(curl -fsSL https://raw.githubusercontent.com/itsalirezaw/wg-bridge/main/install.sh) --upgrade
 ```
 
 مدیر تانل به‌روز می‌شود و کلیدها، پیکربندی WireGuard و اتصال‌های فعال حفظ می‌شوند. نام نقش‌های نسخهٔ 0.1 به همان کارکرد ورودی و خروجی قبلی نگاشت می‌شود.
@@ -67,6 +67,6 @@ MTU پیش‌فرض `1380` است. خروج IPv6 در صورت پشتیبانی 
 
 [طراحی شبکه و مسیرهای مستثنا](docs/network.md) · [توسعه و آزمون](CONTRIBUTING.md) · [تغییرات نسخه‌ها](CHANGELOG.md) · [طرح ویدیوی فارسی](docs/video-fa.md)
 
-ساخته‌شده توسط **alirezaw** · [گیت‌هاب](https://github.com/Alirezaafshar20) · [یوتیوب @ialirezaw](https://www.youtube.com/@ialirezaw)
+ساخته‌شده توسط **alirezaw** · [گیت‌هاب](https://github.com/itsalirezaw) · [یوتیوب @ialirezaw](https://www.youtube.com/@ialirezaw)
 
 مجوز [MIT](LICENSE)

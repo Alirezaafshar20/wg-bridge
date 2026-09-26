@@ -17,9 +17,9 @@ import sys
 import tempfile
 import time
 
-VERSION = '0.2.1'
+VERSION = '0.2.2'
 AUTHOR = 'alirezaw'
-GITHUB_URL = 'https://github.com/Alirezaafshar20'
+GITHUB_URL = 'https://github.com/itsalirezaw'
 YOUTUBE_URL = 'https://www.youtube.com/@ialirezaw'
 STATE = Path('/etc/wg-bridge')
 WG = Path('/etc/wireguard')

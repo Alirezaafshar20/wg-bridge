@@ -2,7 +2,7 @@
 
 **English** | [فارسی](README.fa.md)
 
-[![Tests](https://github.com/Alirezaafshar20/wg-bridge/actions/workflows/test.yml/badge.svg)](https://github.com/Alirezaafshar20/wg-bridge/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Tests](https://github.com/itsalirezaw/wg-bridge/actions/workflows/test.yml/badge.svg)](https://github.com/itsalirezaw/wg-bridge/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Routed WireGuard transport between an Iran ingress server and an external egress client. A single peer pair carries the outgoing traffic of services and proxy panels running on the Iran host.
 
@@ -21,7 +21,7 @@ apt-get update && apt-get install -y curl ca-certificates
 ## Install
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Alirezaafshar20/wg-bridge/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/itsalirezaw/wg-bridge/main/install.sh)
 ```
 
 ## Configuration
@@ -44,7 +44,7 @@ The menu provides status, diagnostics, restart, pairing, stop, start and complet
 ## Upgrade
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Alirezaafshar20/wg-bridge/main/install.sh) --upgrade
+bash <(curl -fsSL https://raw.githubusercontent.com/itsalirezaw/wg-bridge/main/install.sh) --upgrade
 ```
 
 Updates the manager while retaining keys, WireGuard configuration and running connections. Legacy v0.1 role names are mapped to their existing ingress/egress function.
@@ -67,6 +67,6 @@ Default MTU: `1380`. IPv6 egress uses NAT66 when available; otherwise affected I
 
 [Network design and routing exceptions](docs/network.md) · [Development and validation](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Persian video outline](docs/video-fa.md)
 
-Created by **alirezaw** · [GitHub](https://github.com/Alirezaafshar20) · [YouTube @ialirezaw](https://www.youtube.com/@ialirezaw)
+Created by **alirezaw** · [GitHub](https://github.com/itsalirezaw) · [YouTube @ialirezaw](https://www.youtube.com/@ialirezaw)
 
 [MIT License](LICENSE)

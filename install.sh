@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # WG Bridge bootstrap and lifecycle entry point.
 set -Eeuo pipefail
-REPO="Alirezaafshar20/wg-bridge"
-REF="v0.2.1"
-CORE_SHA256="0de4b71b19b5a33b8cb1fb13a83127848ac2ce03b6690011458c4a0a507fcc33"
+REPO="itsalirezaw/wg-bridge"
+REF="v0.2.2"
+CORE_SHA256="c40f647e598084d76132b44f21cbfe964ef2f4c5d4c8d63424f7c19100539f2c"
 APP_DIR="/usr/local/lib/wg-bridge"
 MODE="${1:-install}"
 

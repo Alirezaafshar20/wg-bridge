@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2 — 2026-09-26
+
+- Update installer downloads, documentation, badges and creator links to `itsalirezaw/wg-bridge` following the GitHub account rename.
+- Retain Ubuntu 26.04 support and the branded menus from 0.2.1; published tags remain unchanged.
+
 ## 0.2.1 — 2026-09-26
 
 - Accept Ubuntu 26.04 LTS, including 26.04.1. Ubuntu point releases retain `VERSION_ID=26.04` in `/etc/os-release`.
