@@ -14,7 +14,7 @@ sudo python3 tests/integration.py
 bash install.sh --check
 ```
 
-The integration suite creates isolated network namespaces and exercises real WireGuard, IPv4/IPv6, NAT, TCP/UDP, forwarded traffic, incoming connections, tunnel loss, restart and cleanup. It does not modify host routing or firewall rules. Its 300 HTTP requests with 40 workers check correctness, not production capacity.
+The integration suite creates isolated network namespaces and exercises real WireGuard, IPv4/IPv6, NAT, TCP/UDP, forwarded traffic, incoming connections, tunnel loss, restart and cleanup. It does not modify host routing or firewall rules. Temporary fixtures use a private directory under `/etc/wireguard` to respect distribution AppArmor profiles and are removed on exit. Its 300 HTTP requests with 40 workers check correctness, not production capacity.
 
 `tests/lifecycle.py` modifies its host and is restricted to explicitly opted-in disposable GitHub Actions VMs. CI runs the installer, systemd units, upgrade, rollback and uninstall on Ubuntu 22.04, 24.04 and 26.04. Debian 12/13 are accepted by the installer; a complete Debian systemd lifecycle is not covered by this CI matrix.
 

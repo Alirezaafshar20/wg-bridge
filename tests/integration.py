@@ -2,6 +2,7 @@
 """Root-only, isolated Linux network test. No host firewall/route modifications.
 
 Creates four network namespaces; runs real wg-quick, NAT and policy routing.
+Temporary fixtures live below /etc/wireguard for distribution AppArmor profiles.
 Never calls the install/uninstall functions against the host filesystem.
 """
 import concurrent.futures
@@ -264,7 +265,11 @@ if __name__ == '__main__':
     os.umask(0o077)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:
-        with tempfile.TemporaryDirectory(prefix='wgb-test-') as tmp:
+        # Ubuntu's wg-quick AppArmor profile permits configurations only under
+        # /etc/wireguard. Keep confinement active and use a private, unique
+        # fixture directory there; all interfaces remain in test namespaces.
+        w.WG.mkdir(mode=0o700, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix='.wgb-test-', dir=w.WG) as tmp:
             test(Path(tmp))
     finally:
         cleanup()
