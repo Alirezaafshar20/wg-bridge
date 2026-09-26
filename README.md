@@ -4,17 +4,15 @@
 
 [![Tests](https://github.com/itsalirezaw/wg-bridge/actions/workflows/test.yml/badge.svg)](https://github.com/itsalirezaw/wg-bridge/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Forward one IPv4 service port from an Iran server to an outside server through WireGuard. Choose TCP, UDP or both. WireGuard transport defaults to **UDP 9999** on both servers and remains configurable. The separate service port is also configurable; `8443` below is an example. Host Internet routes, other service ports and IPv6 configuration are unchanged.
+Route selected panel outbounds from an Iran server to an outside Internet exit through kernel WireGuard. Keep users, inbound ports and accounting in your existing panel. Host default routes stay in place, so SSH and unrelated services keep their normal Internet connection.
 
-```text
-User → Iran:8443 → WireGuard → Outside service:8443
-```
+WG Bridge configures the link, selective routing, outside NAT and tunnel failure guards. Configure your panel manually to use source **10.204.0.2** and interface **wgb-exit**. No SOCKS listener, extra proxy protocol or panel is installed. Multiple panel inbounds can share this one outbound.
 
-The destination application runs on the outside server. This forwards connections; it does not select the Internet traffic of a proxy application running on Iran by its incoming port. Existing v0.1/v0.2 deployments must follow [migration](#migration-from-v01v02).
+WireGuard transport defaults to **9999/UDP** on both servers; choose another free UDP port during installation if needed. Panel inbound ports are independent of this transport port.
 
 ## Requirements
 
-Ubuntu 22.04/24.04/26.04 LTS (26.04.1 included) or Debian 12/13; root; systemd; a WireGuard-capable kernel; public IPv4 on both hosts. Allow the selected service port on Iran and the WireGuard UDP transport port on **both** provider firewalls (default `9999/udp`). The installer provisions the remaining distribution packages.
+Ubuntu 22.04/24.04/26.04 LTS (including 26.04.1) or Debian 12/13; root; systemd; a WireGuard-capable kernel; public IPv4 on both hosts. Allow the selected WireGuard UDP port on both provider firewalls. Allow your own panel inbound ports on Iran. Remaining dependencies are installed automatically.
 
 ```bash
 apt-get update && apt-get install -y curl ca-certificates
@@ -26,14 +24,34 @@ apt-get update && apt-get install -y curl ca-certificates
 bash <(curl -fsSL https://raw.githubusercontent.com/itsalirezaw/wg-bridge/main/install.sh)
 ```
 
-## Configuration
+## Connect the servers
 
-1. Run the installer on **Outside**, choose **2 — Client**, and confirm its public IP and WireGuard UDP port (default `9999`). Enter **Iran's public IPv4** and its planned WireGuard UDP port (the Outside port is suggested). Then select the destination service port and protocol (`both`). Each suggested value is highlighted with “Press Enter to use …”; type your own value to override it. A free random service port is suggested when you do not already have an application port.
-2. Run the destination application on `0.0.0.0:8443` or `10.204.0.1:8443`, substituting your chosen port. A service bound only to `127.0.0.1` or the public IP is not reachable through the private tunnel address. This installer does not deploy the application itself.
-3. Copy the complete **WGB2** pairing code. On **Iran**, choose **1 — Server**, paste the code, and confirm the Iran IP and UDP port already configured on Outside. These must match the pairing code; to change them, update the Iran peer on Outside and copy its refreshed code. Choose the public forwarding port: the destination service port is suggested when available, otherwise a free port is suggested. The pasted pairing code is visible. Use v0.3.1 or newer on both sides for the new pairing fields.
-4. Connect from another device to `IRAN_IP:PORT`. The full pairing code, including `WGB2.`, is required; it contains private keys and must remain secret.
+1. On **Outside**, choose **2 — Client**. Confirm its public IPv4 and WireGuard UDP port. Enter the **Iran public IPv4** and its planned WireGuard UDP port. Press Enter to accept a highlighted default.
+2. Copy the complete **WGB3** pairing code, including `WGB3.`. It contains private keys: keep it private and hide it in recordings. Use it on one Iran server only.
+3. On **Iran**, run the same installer and choose **1 — Server**. Paste the code visibly, then confirm Iran's IP and UDP port. They must match the values entered on Outside.
+4. Run `wg-bridge doctor` on Iran. It checks the handshake, source route, HTTPS through Outside and UDP DNS through the tunnel. A handshake alone does not prove Internet access.
+5. Configure the panel below. WG Bridge does not edit panel databases, configs or user accounts.
 
-The service port and WireGuard transport port have different purposes. The same local UDP port cannot serve both. Changing the service port does not resolve a blocked WireGuard UDP path. Both peers have an explicit endpoint and a 25-second keepalive, so either can initiate the encrypted connection. Any free UDP port from 1 to 65535 can be selected; it must also be permitted by the providers and reachable across the network. Port selection alone cannot guarantee connectivity. One installation supports one server pair and one port mapping.
+Both peers use an explicit endpoint and a 25-second keepalive. One installation manages one pair. Port selection cannot overcome every provider or network restriction; a reachable UDP path is required.
+
+## Connect your panel
+
+For **3x-ui and other Xray panels**, create an outbound with:
+
+- Protocol: `freedom`
+- Tag: `wg-out`
+- Send Through: `10.204.0.2`
+- Sockopts / Interface: `wgb-exit`
+- IPv4 resolution strategy: `ForceIPv4`
+- Redirect and Dialer Proxy: empty; Mark: `0`
+
+Route the chosen **user inbound tags** to `wg-out`. Preserve the panel API and blocking rules. Configure DNS to use this outbound as well. Adding an outbound alone does not select users or change DNS routing.
+
+**[Panel setup, DNS and JSON examples](docs/panels.md)** · **[راهنمای فارسی پنل و DNS](docs/panels.fa.md)**
+
+Other engines can use the tunnel if they support binding an outbound to a source IP or network interface. The guide includes sing-box field names; panel UI support varies. Host services and Docker panels using host networking can access the interface. A panel inside a separate Docker bridge namespace needs additional network integration and is not covered by automatic setup.
+
+This release provides **IPv4 egress**. IPv6 destinations are not forwarded; interface-bound IPv6 is blocked. Existing host IPv6 remains available to unrelated services. There is no direct fallback for traffic correctly bound to the tunnel. Panel rules selecting other outbounds remain the administrator's choice.
 
 ## Management
 
@@ -41,53 +59,33 @@ The service port and WireGuard transport port have different purposes. The same 
 wg-bridge
 wg-bridge status
 wg-bridge doctor
+wg-bridge panel
 ```
 
-Run `wg-bridge` from any directory to open the installed menu; there is no need to run the installer again.
+Run `wg-bridge` from any directory. The menu includes status, diagnostics, restart, stop/start, pairing, panel settings and uninstall. Services start at boot. Stopping WireGuard leaves the routing guards installed; only tunnel-selected traffic becomes unavailable.
 
-The menu provides status, diagnostics, restart, pairing, stop/start, port editing on Iran and complete removal. To change only Iran's public port:
-
-```bash
-wg-bridge port 9443
-```
-
-Keys and the outside service port are retained. Existing forwarded connections can be interrupted by a port change. To change the outside service port or protocol, reinstall and pair both hosts with the new selection.
-
-On **Outside**, menu option **8 — Set Iran peer endpoint** sets or corrects Iran's public IP and WireGuard UDP port. The equivalent command is:
+To correct Iran's endpoint, run on **Outside**:
 
 ```bash
 wg-bridge peer IRAN_PUBLIC_IPV4 IRAN_WIREGUARD_UDP_PORT
 ```
 
-Replace both placeholders with the actual Iran values. This preserves keys, both local service ports and Outside's own WireGuard port, refreshes the pairing code and restarts an active tunnel. It also enables two-way initiation on an upgraded v0.3.0 installation. It does not change Iran's listening port remotely.
+This preserves keys and Outside's UDP port, updates the pairing code and restarts an active tunnel. It does not remotely change Iran's listening port.
 
-Services start at boot. Stopping WireGuard leaves only the selected mapping unavailable; direct Internet and unrelated services retain their routes. Test the forwarded port from another host: connections initiated locally on Iran are not redirected.
+## Upgrade and convert v0.3
 
-## Upgrade
+Run on **Outside first, then Iran**:
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/itsalirezaw/wg-bridge/main/install.sh) --upgrade
+wg-bridge routing
 ```
 
-Updates compatible v0.3 installations while retaining keys and configuration. Full-routing v0.1/v0.2 installations are rejected before replacing the manager or changing the network.
+`--upgrade` replaces only the manager. `wg-bridge routing` converts the old public-port mapping to panel egress, backs up the old state/configuration under `/etc/wg-bridge/before-panel-*`, and restarts the tunnel. Keys, private link addresses and existing WireGuard ports are retained. The old public forwarding rule is removed on Iran. Both sides must be converted before panel egress works; existing peers need no new pairing code. Do not convert an installation that still needs its old public mapping.
 
-The new `9999` default applies to new installations; upgrades retain existing ports. To enable two-way initiation on an existing pair, upgrade both managers and use **Set Iran peer endpoint** on Outside with Iran's current public IP and **current WireGuard port**. Existing keys do not need replacement. New managers still accept older WGB2 codes; older managers cannot consume the added peer fields.
+On panel-routing installations, repeating `wg-bridge routing` is a no-op. The `9999` default never changes an existing port automatically. Older WGB2 pairs remain manageable in legacy port-forward mode until explicitly converted.
 
-## Migration from v0.1/v0.2
-
-On **Iran**, restore direct Internet before downloading the new installer:
-
-```bash
-systemctl stop wg-quick@wgb-exit.service wg-bridge-network.service
-```
-
-On **each host**, use the installed manager to remove the old tunnel:
-
-```bash
-wg-bridge uninstall
-```
-
-Confirm `REMOVE`. This deletes the old WG Bridge tunnel and keys. Install v0.3 on Outside first, then Iran, using a **new WGB2 code**. Old WGB1 codes are incompatible. Plan for the selected service to run on Outside; a panel remaining on Iran needs a separate application-level outbound configuration.
+Full-routing v0.1/v0.2 cannot be upgraded in place. On Iran, stop `wg-quick@wgb-exit` and `wg-bridge-network` to restore direct access; then use the old manager's `wg-bridge uninstall` on each host and install the current release Outside first, with a new WGB3 code. WGB1 codes are incompatible.
 
 ## Uninstall
 
@@ -95,7 +93,7 @@ Confirm `REMOVE`. This deletes the old WG Bridge tunnel and keys. Install v0.3 o
 wg-bridge uninstall
 ```
 
-Confirm `REMOVE`. Removal is also available in the menu or through the installer's `--uninstall` option. Owned rules, keys, interface, services and manager are removed; shared distribution packages are retained. Iran's recorded IPv4 forwarding setting is restored if its value is still owned by the tool.
+Confirm `REMOVE`. Owned firewall rules, policy rules, private table entries, interface, services, keys and manager are removed. The saved IPv4 forwarding value is restored if it still has the value WG Bridge set. Shared distribution packages remain. Remove or disable the tunnel outbound in your panel separately.
 
 ## Operations
 
@@ -103,9 +101,9 @@ Confirm `REMOVE`. Removal is also available in the menu or through the installer
 journalctl -u wg-bridge-network -u wg-quick@wgb-exit --no-pager -n 60
 ```
 
-MTU: `1380`. Forwarding uses IPv4; existing host IPv6 remains independent. The outside application sees `10.204.0.2` as the client address because the mapping uses source NAT. Listen-port conflicts and overlapping tunnel subnets are rejected. Custom policy routing, nftables base chains, Docker-published ports and firewall reloads require integration review. The installer does not configure provider firewalls or protocol obfuscation.
+MTU is `1380`. Table `51888` and priorities `18880/18881` are reserved for the selected source/interface. Conflicts are rejected before installation or conversion. Existing custom routing and independent nftables/firewall managers need manual integration. Do not flush firewall rules while the tunnel is in use; rerun restart and doctor after firewall changes. WG Bridge does not configure provider firewalls or protocol obfuscation.
 
-[Network design](docs/network.md) · [Development and validation](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Persian video outline](docs/video-fa.md)
+[Network design](docs/network.md) · [Validation](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Persian recording guide](docs/video-fa.md)
 
 Created by **alirezaw** · [GitHub](https://github.com/itsalirezaw) · [YouTube @ialirezaw](https://www.youtube.com/@ialirezaw)
 

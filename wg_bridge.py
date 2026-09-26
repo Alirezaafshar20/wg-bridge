@@ -517,6 +517,9 @@ Requires=wg-bridge-network.service
 After=wg-bridge-network.service
 ''', 0o644)
     run(['systemctl', 'daemon-reload'])
+    # These are deliberate operator actions on oneshot units, not automatic
+    # crash retries. Clear systemd's rapid-start limiter before a conversion.
+    run(['systemctl', 'reset-failed', 'wg-bridge-network.service', 'wg-quick@'+LINK], check=False)
     run(['systemctl', 'enable', '--now', 'wg-bridge-network.service'])
     for name in names:
         run(['systemctl', 'enable', '--now', 'wg-quick@'+name])
@@ -699,7 +702,7 @@ def panel_settings():
     print('\nPanel outbound settings (configure manually; no SOCKS service is installed):')
     print(json.dumps({'tag': 'wg-out', 'protocol': 'freedom', 'sendThrough': ENTRY_IP,
                       'settings': {'domainStrategy': 'ForceIPv4'},
-                      'streamSettings': {'sockopt': {'interface': LINK}}}, indent=2))
+                      'streamSettings': {'sockopt': {'interface': LINK, 'domainStrategy': 'ForceIPv4'}}}, indent=2))
     print('Route selected user inbound tags to wg-out. Preserve the panel API and blocking rules.')
     print('Also route panel DNS through wg-out. Full Xray DNS/routing examples:')
     print('https://github.com/itsalirezaw/wg-bridge/blob/main/docs/panels.md')
@@ -830,11 +833,15 @@ def change_peer(s, address=None, port=None):
     try:
         save(config, link_config(updated))
         persist(updated)
-        if active: run(['systemctl', 'restart', 'wg-quick@'+LINK])
+        if active:
+            run(['systemctl', 'reset-failed', 'wg-quick@'+LINK], check=False)
+            run(['systemctl', 'restart', 'wg-quick@'+LINK])
     except (Exception, KeyboardInterrupt):
         save(config, old_config)
         persist(s)
-        if active: run(['systemctl', 'restart', 'wg-quick@'+LINK], check=False)
+        if active:
+            run(['systemctl', 'reset-failed', 'wg-quick@'+LINK], check=False)
+            run(['systemctl', 'restart', 'wg-quick@'+LINK], check=False)
         raise
     print(f'Outside peer updated: {updated["entry_ip"]}:{updated["entry_port"]}; keepalive every 25 seconds.')
     print('Keys and service ports retained. For a new Iran installation, copy this refreshed pairing code (SECRET):')
@@ -885,6 +892,7 @@ def enable_routing(s):
         persist(s)
         save(config, old_config)
         run(['sysctl', '-w', 'net.ipv4.ip_forward='+before_forward])
+        run(['systemctl', 'reset-failed', 'wg-bridge-network', 'wg-quick@'+LINK], check=False)
         run(['systemctl', 'start', 'wg-bridge-network'])
         if was_active: run(['systemctl', 'start', 'wg-quick@'+LINK])
         raise
@@ -925,6 +933,7 @@ def menu():
     if choice == '1': status(s)
     elif choice == '2': doctor(s)
     elif choice in ['3', '6']:
+        run(['systemctl', 'reset-failed', 'wg-bridge-network', 'wg-quick@'+LINK], check=False)
         run(['systemctl', 'start', 'wg-bridge-network.service'])
         network(s, True)
         run(['systemctl', 'restart' if choice == '3' else 'start', 'wg-quick@'+LINK])

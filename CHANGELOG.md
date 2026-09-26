@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0 — 2026-09-26
+
+- Add panel egress through source/interface-selected kernel WireGuard without installing SOCKS or editing panels.
+- New WGB3 installs provide Outside NAT and Iran policy routing with terminal failure routes; keep host defaults unchanged and block tunnel-bound IPv6.
+- Convert existing v0.3 pairs with key/port preservation, backups and rollback. Keep WGB2 legacy management available.
+- Add panel instructions, DNS/routing examples, expanded doctor checks and English/Persian recording documentation.
+- Test TCP/UDP/DNS, both socket binding methods, strict rp_filter, failures, cleanup and lifecycle conversions. Reset owned systemd start-limit state for intentional restarts.
+
 ## 0.3.1 — 2026-09-26
 
 - Default new WireGuard transport listeners to UDP 9999; keep both peer ports editable and service ports independent.

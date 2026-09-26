@@ -188,6 +188,11 @@ def main():
         assert not w.APP.exists() and not w.LAUNCHER.exists()
         print('PASS: both modes/roles, upgrade, legacy rejection, transactional conversions and rollback, restart guards, cancellation and complete uninstall')
     finally:
+        # Unit properties are safe to print; journals/configs may contain keys.
+        if sys.exc_info()[0] is not None:
+            for unit in ['wg-bridge-network','wg-quick@'+w.LINK]:
+                p=subprocess.run(['systemctl','show',unit,'-p','Result','-p','ActiveState','-p','SubState'],capture_output=True,text=True)
+                print(unit,p.stdout,flush=True)
         if (w.STATE/'state.json').exists():
             with contextlib.redirect_stdout(io.StringIO()): w.uninstall(w.load(), confirm=False)
 

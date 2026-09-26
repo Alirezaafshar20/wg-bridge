@@ -1,26 +1,23 @@
-# WG Bridge v0.3.1
+# WG Bridge v0.4.0
 
-WireGuard transport now defaults to **UDP 9999** on both servers. The transport port remains editable and is separate from the single forwarded service port.
+Run your panel on Iran and send selected outbounds through kernel WireGuard to an outside Internet exit. Multiple user inbounds share the link, while SSH and unrelated services retain their host default routes.
 
-Outside setup now asks for Iran's public IPv4 and planned WireGuard UDP port. Both peers receive an explicit endpoint and a 25-second keepalive, allowing either server to initiate. The pairing code carries the Iran endpoint, and Iran setup rejects a mismatch before modifying the network.
+- New installs use panel routing with WGB3 pairing. No SOCKS daemon or panel configuration is installed.
+- Bind panel outbounds to `10.204.0.2` / `wgb-exit`; configure inbound selection and DNS manually. English and Persian guides include Xray/3x-ui examples and integration notes for other engines.
+- Outside enables scoped forwarding and NAT. Iran uses source/interface policy routing, terminal unreachable routes and an OUTPUT guard. Stopping/removing WireGuard cannot fall through to direct host routing for correctly bound traffic.
+- IPv4 egress; interface-bound IPv6 is blocked. Global host IPv6 and default routes are preserved.
+- `wg-bridge routing` converts v0.3 pairs, Outside first then Iran, with backups and rollback. Keys and transport ports stay the same; the old public port mapping is removed.
+- `wg-bridge doctor` checks source routing, HTTPS exit address and UDP DNS. `wg-bridge panel` prints panel settings; `wg-bridge` opens the menu.
+- UDP 9999 remains the configurable default for new installations.
 
-- Open the selected WireGuard UDP ports in both provider firewalls; any chosen port still needs a working network path.
-- Use Outside menu option **8 — Set Iran peer endpoint**, or `wg-bridge peer IRAN_PUBLIC_IPV4 IRAN_WIREGUARD_UDP_PORT`, to configure the remote endpoint without replacing keys. An active tunnel restarts; changes roll back if that restart fails.
-- Compatible upgrades preserve existing ports and configuration. After upgrading an older pair, use the Outside peer command with Iran's **current** WireGuard port to enable bidirectional initiation. The new default does not silently move existing installations.
-- New managers accept older WGB2 codes. Use v0.3.1 or newer on both hosts for codes containing the new peer fields.
-- One selected IPv4 TCP/UDP service port is forwarded; ordinary Internet routes and host IPv6 remain unchanged.
+Upgrade both hosts using the README, then run `wg-bridge routing` on Outside and Iran. Existing panel-routing installs need only the manager upgrade. Older v0.1/v0.2 full-routing installations require uninstall/reinstall. WGB2 remains supported for existing legacy mappings.
 
-Validation covers actual WireGuard initiation from Outside, TCP/UDP forwarding, custom ports, preserved host connectivity, peer changes, rollback, upgrade and uninstall on Ubuntu 22.04, 24.04 and 26.04. This is a preview release; these tests do not establish production capacity or guarantee that a provider permits every UDP port.
+Validation covers real WireGuard TCP/UDP/DNS, source/interface binding, strict reverse-path filtering, 300 concurrent-request checks per mode, tunnel failures, unrelated services, conversion rollback and installer lifecycle. These are correctness checks, not a throughput or user-capacity guarantee.
 
-[English](https://github.com/itsalirezaw/wg-bridge#readme) · [فارسی](https://github.com/itsalirezaw/wg-bridge/blob/main/README.fa.md)
+[English installation](README.md) · [نصب فارسی](README.fa.md) · [Panel guide](docs/panels.md) · [راهنمای پنل](docs/panels.fa.md)
 
-<details>
-<summary>توضیحات فارسی</summary>
+---
 
-پیش‌فرض پورت ارتباط خود WireGuard روی هر دو سرور **UDP 9999** است و همچنان می‌توانید پورت دلخواه را وارد کنید. پورت سرویس جداست و فقط همان یک پورت از ایران به خارج منتقل می‌شود.
+نسخه 0.4 خروجی انتخاب‌شدهٔ پنل ایران را با WireGuard به اینترنت خارج می‌فرستد. چند اینباند می‌توانند یک خروجی مشترک داشته باشند؛ مسیر پیش‌فرض SSH و سرویس‌های دیگر تغییر نمی‌کند. SOCKS نصب نمی‌شود و تنظیم خروجی، Routing و DNS داخل پنل دستی است.
 
-در نصب خارج، IP عمومی و پورت WireGuard ایران هم پرسیده می‌شود تا هر دو سمت بتوانند ارتباط را آغاز کنند. Keepalive هر دو طرف ۲۵ ثانیه است. مقادیر ایران داخل کد اتصال قرار می‌گیرند و نصب ایران تطابقشان را بررسی می‌کند. UDP ارتباط WireGuard باید در فایروال ارائه‌دهندهٔ هر دو سرور باز باشد.
-
-برای نصب قبلی، ابتدا مدیر هر دو سمت را ارتقا دهید و سپس روی خارج گزینهٔ 8، Set Iran peer endpoint، را با IP و پورت فعلی WireGuard ایران اجرا کنید. کلیدها حفظ می‌شوند؛ ارتقا پورت‌های قبلی را خودکار به 9999 تغییر نمی‌دهد. مدیر جدید کدهای WGB2 قدیمی را می‌پذیرد؛ برای کد جدید، هر دو سمت باید نسخهٔ 0.3.1 یا جدیدتر باشند.
-
-</details>
+برای تبدیل 0.3، ابتدا هر دو مدیر را ارتقا دهید و سپس `wg-bridge routing` را روی خارج و بعد ایران اجرا کنید. کلیدها و پورت فعلی حفظ، از تنظیمات قبلی پشتیبان‌گیری و فوروارد عمومی قدیمی حذف می‌شود. خروجی این نسخه IPv4 است. راهنمای فارسی پنل و ضبط ویدیو در مخزن قرار دارد.
