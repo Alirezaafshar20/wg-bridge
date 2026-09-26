@@ -14,7 +14,7 @@ sudo python3 tests/integration.py
 bash install.sh --check
 ```
 
-The integration suite creates isolated network namespaces and exercises real WireGuard, IPv4/IPv6, NAT, TCP/UDP, forwarded traffic, incoming connections, tunnel loss, restart and cleanup. It does not modify host routing or firewall rules. Temporary fixtures use a private directory under `/etc/wireguard` to respect distribution AppArmor profiles and are removed on exit. Its 300 HTTP requests with 40 workers check correctness, not production capacity.
+The integration suite creates isolated network namespaces and exercises real WireGuard, one-port DNAT/SNAT, TCP/UDP selection, custom ports, unchanged ordinary IPv4/IPv6 routes, incoming connections, tunnel loss, restart and cleanup. It does not modify host routing or firewall rules. Temporary fixtures use a private directory under `/etc/wireguard` to respect distribution AppArmor profiles and are removed on exit. Its 300 HTTP requests with 40 workers check correctness, not production capacity.
 
 `tests/lifecycle.py` modifies its host and is restricted to explicitly opted-in disposable GitHub Actions VMs. CI runs the installer, systemd units, upgrade, rollback and uninstall on Ubuntu 22.04, 24.04 and 26.04. Debian 12/13 are accepted by the installer; a complete Debian systemd lifecycle is not covered by this CI matrix.
 
@@ -22,7 +22,7 @@ The integration suite creates isolated network namespaces and exercises real Wir
 
 Keep `wg_bridge.py`'s `VERSION`, the installer's `REF`, changelog and release notes aligned. The README uses a stable `main/install.sh` bootstrap URL; the bootstrap downloads its manager from the pinned release tag. Refresh the installer's `CORE_SHA256` from the final LF-encoded `wg_bridge.py`. Validate the checksum, network suite and lifecycle suite before tagging; published tags are immutable.
 
-Manager upgrades must preserve keys and the active WireGuard configuration. Changes to persistent state require backward-compatible loading or an explicit migration. New firewall/routing resources require scoped removal and rollback coverage.
+Compatible manager upgrades preserve keys and the active WireGuard configuration. v0.3 explicitly rejects v0.1/v0.2 full-routing state before replacing the installed manager; migration requires uninstalling both old peers and re-pairing. Changes to persistent state require compatible loading or an explicit migration. New firewall/routing resources require scoped removal and rollback coverage.
 
 ## Reports
 

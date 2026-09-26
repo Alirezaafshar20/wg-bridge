@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0 — 2026-09-26
+
+- Replace full-host routing with one configurable IPv4 port mapping from Iran to Outside. Suggest random available service/transport ports; select TCP, UDP or both.
+- Keep host default routes, policy rules and IPv6 unchanged; confine failure to the selected mapping.
+- Add WGB2 pairing with visible input, target service diagnostics and Iran port editing from the menu/CLI.
+- Explain every setup step and highlight Enter-to-accept defaults; open the grouped menu directly with `wg-bridge`.
+- Reject legacy full-routing upgrades before mutation; document stop, uninstall and re-pair migration.
+- Verify direct IPv4/IPv6 access, existing services, LAN forwarding, custom/protocol-specific ports and unavailable peers alongside installer lifecycle tests.
+
 ## 0.2.2 — 2026-09-26
 
 - Update installer downloads, documentation, badges and creator links to `itsalirezaw/wg-bridge` following the GitHub account rename.

@@ -89,11 +89,28 @@ def main():
             else: raise AssertionError('Expected failure did not occur')
         absent()
         assert w.APP.exists() and w.LAUNCHER.exists()
+        # Exercise Iran installation with an unreachable peer, then edit only
+        # the public mapping. Host defaults and existing SSH routing must stay.
+        route_before = call(['ip', '-j', 'route', 'show', 'default'])
+        rules_before = call(['ip', '-j', 'rule'])
+        entry_answers = '1\n'+state['pairing']+'\n9.9.9.9\n51831\n8443\n'
+        call(['script', '-q', '-e', '-c', 'bash install.sh', '/dev/null'], entry_answers)
+        entry = w.load()
+        assert entry['role'] == 'entry' and entry['listen_port'] == 8443
+        entry_config = config.read_bytes()
+        call(['/usr/local/sbin/wg-bridge', 'port', '9443'])
+        assert w.load()['listen_port'] == 9443 and config.read_bytes() == entry_config
+        assert call(['ip', '-j', 'route', 'show', 'default']) == route_before
+        assert call(['ip', '-j', 'rule']) == rules_before
+        with contextlib.redirect_stdout(io.StringIO()):
+            w.uninstall(w.load(), confirm=False, purge=False)
+        absent()
+        assert all(w.run(['sysctl', '-n', k]) == v for k, v in before.items())
         call(['script', '-q', '-e', '-c', 'bash install.sh', '/dev/null'], '2\n8.8.8.8\n51830\n8443\nboth\n')
         call(['script', '-q', '-e', '-c', 'bash install.sh --uninstall', '/dev/null'], 'REMOVE\n')
         absent()
         assert not w.APP.exists() and not w.LAUNCHER.exists()
-        print('PASS: installer, systemd, stop/start, compatible upgrade, legacy rejection, cancellation, rollback and complete uninstall')
+        print('PASS: both roles, failed handshake isolation, port editing, upgrade, legacy rejection, cancellation, rollback and complete uninstall')
     finally:
         if (w.STATE/'state.json').exists():
             with contextlib.redirect_stdout(io.StringIO()): w.uninstall(w.load(), confirm=False)

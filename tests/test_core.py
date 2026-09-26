@@ -99,6 +99,10 @@ class CoreTests(unittest.TestCase):
         for bad in ['TCP', 'icmp', '', None]:
             with self.assertRaises(w.BridgeError): w.valid_protocol(bad)
 
+    def test_port_suggestion_retries_busy_and_excluded_ports(self):
+        with patch.object(w.secrets, 'randbelow', side_effect=[1, 2, 3]), patch.object(w, 'free_port', side_effect=[w.BridgeError('busy'), None, None]):
+            self.assertEqual(w.suggest_port('both', exclude=(20001,)), '20003')
+
 
 if __name__ == '__main__':
     unittest.main()

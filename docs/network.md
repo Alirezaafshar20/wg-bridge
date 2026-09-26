@@ -1,56 +1,45 @@
 # Network design
 
-The Iran ingress host is **Server**; the outside egress host is **Client**. These are deployment roles, independent of WireGuard’s peer-to-peer transport. Iran initiates UDP toward the outside endpoint, which learns the Iran endpoint. Initialize the outside Client first to generate the pairing code, then configure the Iran Server. One code provisions exactly one pair.
+WG Bridge v0.3 forwards one IPv4 TCP/UDP port from Iran to a service running on Outside. It does not route the Iran host's general Internet traffic or infer proxy outbounds from an inbound port. Pairing input is visible. Each pair has one service mapping; TCP, UDP or both may share that port.
 
-Internally, persisted roles are `entry` and `exit`. The manager reads v0.1 `client` as `entry` and v0.1 `server` as `exit`, preserving the original routing behavior. The version-1 pairing format is retained for compatibility; its historical field names describe the transport endpoint, not the current menu labels.
+## Transport and addressing
 
-## Resources owned by WG Bridge
+The Iran host is **Server (entry)**; the outside host is **Client (exit)**. These are deployment labels. Iran initiates WireGuard UDP to Outside, with a 25-second keepalive. The service port is independent of the WireGuard UDP transport port. The installer suggests available random ports between 20000 and 59999; each is editable. Iran reuses the destination service port if locally available. Port randomization is a convenience, not a guarantee of secrecy or availability.
 
-- Interface `wgb-exit`, MTU 1380. Outside `10.204.0.1/30`, entry `10.204.0.2/30`; IPv6 `fd42:204::1/64` and `::2/64`.
-- Entry-only dummy interface `wgb-block`, a local discard destination used while the tunnel is down.
-- Entry route table and WireGuard fwmark `52031`; policy priorities `12127`–`12131`.
-- Connection mark bit `0x40000000` records incoming WAN connections. Restoring that bit does not overwrite WireGuard's transport mark.
-- Dedicated `WGB_*` chains in iptables/ip6tables filter, nat and mangle, with explicit jumps at the top of relevant chains. Existing global chains are never flushed. FORWARD allowances override the host default forwarding policy only for this tunnel.
-- `wg-bridge-network.service`, the standard `wg-quick@wgb-exit` unit and its owned dependency drop-in.
-- `/etc/wg-bridge`, `/etc/wireguard/wgb-exit.conf`, `/usr/local/lib/wg-bridge/wg_bridge.py` and `/usr/local/sbin/wg-bridge`.
+Interface `wgb-exit` has MTU 1380. Iran uses `10.204.0.2/30`; Outside uses `10.204.0.1/30`. Each peer permits only the other's private `/32`. Both configs use `Table = off`; assigning the interface address supplies the connected private route. No default routes, policy rules, packet marks or dummy interfaces are installed. Host IPv6 is untouched.
 
-IPv4/IPv6 forwarding is enabled. Loose IPv4 reverse-path checking accommodates the asymmetric encrypted/cleartext interfaces. WAN IPv6 `accept_ra=2` preserves SLAAC/default router advertisements with forwarding enabled. Previous sysctl values are recorded and restored on uninstall only if still equal to the values this tool set. Installing other routing services afterward requires reviewing these shared settings before uninstalling.
+The WGB2 pairing payload carries the target service port/protocol and keys. It is encoded, not encrypted. One code provisions one pair. WGB1 belongs to the old full-routing architecture and is rejected explicitly.
 
-## Routing and NAT
+## Packet path
 
-New ordinary Internet connections from the entry, and forwarded flows from networks behind it, select table 52031. Source NAT on the entry makes the outside peer's AllowedIPs a single entry address per family. Outside masquerading supplies public egress; no provider static routes are needed. TCP MSS is clamped toward the tunnel. UDP and other IP traffic use the same tunnel.
+On Iran, a `nat/PREROUTING` rule matches the chosen protocol and destination port, ingress WAN interface, and a destination local to the host. DNAT sends that connection to `10.204.0.1:TARGET_PORT`. A matching forwarding rule permits only that mapping toward `wgb-exit`. SNAT to `10.204.0.2` guarantees a symmetric reply through Iran. The outside application therefore sees the private Iran address, not the original client IP. Payload and TLS are passed through unchanged.
 
-Incoming WAN connections get a connection mark; their replies consult the main table. This preserves SSH and the response path of locally running panel/proxy listeners. Existing inbound conntrack entries are marked at installation as well. A separate proxy connection to a destination website is a fresh connection without that bypass mark.
+Outside accepts the target port from its private peer, plus tunnel ICMP diagnostics. Other incoming traffic from the WireGuard interface and forwarding through it are rejected. The target application must bind the private address or `0.0.0.0`; a public-IP-only or loopback-only listener is not reachable through this mapping. Outside's public service access remains governed by its existing firewall.
 
-Exceptions consult the existing main route table:
+There is no `OUTPUT` redirect: Iran-local requests and downloads retain their normal route. Existing IPv4/IPv6 default routes, unrelated forwarded LAN traffic and inbound services keep their paths. Only Iran's `net.ipv4.ip_forward` is enabled; its previous value is recorded and restored on removal if still equal to the managed value.
 
-- local destinations (Linux's existing priority-zero local table);
-- marked responses to incoming WAN connections;
-- the administrator's SSH source address captured during installation;
-- the outside tunnel endpoint IPv4;
-- non-default routes already present in the main table, including connected/provider/private networks;
-- WireGuard UDP transport carrying its fwmark.
+## Failure and lifecycle
 
-The SSH source exception remains until uninstall, including new egress to that same IP. These exceptions mean “all traffic” is not literal. Applications that intentionally bind special devices or use custom routing/marks need separate validation. Inbound WAN forwarding/DNAT and TProxy are outside the automatic configuration scope.
+When the peer is unreachable, only the selected mapping times out. If the local WG interface disappears, a mapping-specific reject rule prevents DNAT packets from escaping through the WAN default route. Stopping WireGuard leaves these rules active. Other traffic does not depend on tunnel availability.
 
-A persistent default to the dummy discard interface `wgb-block`, metric 32767, remains in table 52031 when the WG interface disappears. Active WireGuard defaults have a lower metric. Filter rules reject output/forwarding to the dummy; the interface itself cannot transmit externally. This supplies an initial route so the OUTPUT connection-mark restoration can still reroute incoming SSH replies onto WAN. An unreachable route would fail before OUTPUT and break these replies. Stopping or losing the interface cannot fall through to the main default for traffic assigned to the tunnel. The fallback does not detect peer failure: packets then stay assigned to the unresponsive tunnel and time out. Stopping only wg-quick retains the block; uninstalling the network service deliberately removes the policy.
+The network service precedes `wg-quick@wgb-exit`. Rules use scoped `WGB_IN`, `WGB_FWD`, `WGB_DNAT`, `WGB_NAT`, `WGB_MSS` chains. DNAT is attached after forwarding guards and removed first during cleanup. No existing global chain is flushed. Uninstall removes owned files, rules, interface, units and keys, retaining shared packages. Interrupted setup rolls back owned network changes.
 
-Outside IPv6 support is inferred from a default route and checked during Iran Server diagnosis. If absent, entry output/forwarding toward the IPv6 Internet is rejected. Internal link IPv6 and the main-table exceptions still exist. Disabled kernel IPv6 is not supported. NAT66 is used when exit IPv6 is available.
+Changing Iran's public port validates availability before changing rules, preserves keys and the target port, and restores the old mapping on failure. Active forwarded connections can be interrupted. The protocol and outside target remain fixed for the pair; changing them requires reinstalling/re-pairing both hosts.
 
-## Persistence and integration boundaries
+## Integration boundaries
 
-The network unit runs before wg-quick and after network-online, UFW/firewalld and Docker at boot. An active firewalld is refused. Rules are idempotent, but external firewall reloads can remove/reorder custom chains. Run Restart from the manager after such a change. Rules from unrelated nftables base chains can still drop packets even after iptables ACCEPT; a custom firewall requires explicit integration.
+Forwarding applies to public IPv4 ingress through the selected WAN interface. There is no IPv6 port forwarding, local hairpin redirect, transparent proxy selection, user accounting or end-user VPN provisioning. Provider firewalls must permit Iran's chosen service port and Outside's WireGuard UDP port.
 
-Existing alternate routing policies, overlapping link subnets, owned names/files or a busy UDP port cause installation to stop rather than overwrite them. One WAN interface is selected from the lowest-metric IPv4 default route. Multi-WAN and nonstandard routing environments are not automatically handled.
+Active firewalld, overlapping private subnets and existing IPv4 policy routing are refused. An occupied local socket is detected, but a Docker-published port or custom NAT redirect can exist without a host listener; these configurations need explicit review. Separate nftables base chains may drop packets even after iptables accepts them. Firewall reloads can remove the rules; restart the manager's tunnel after reviewing such changes. WireGuard requires a working UDP path and does not obfuscate its protocol.
 
-No quotas, per-user accounting, panels, multiple exit selection, obfuscation or end-user VPN configuration are included. The tunnel's aggregate transfer counters are not per-panel-user billing.
+## Migration and verification
 
-## Capacity
+v0.1/v0.2 used default-route policy and different pairing semantics. An in-place upgrade is refused before replacing the old manager. Stop both WG Bridge services on Iran to restore direct Internet, uninstall the old deployment on both hosts, then install Outside followed by Iran with a fresh WGB2 code. See the README for commands.
 
-Each peer handles many concurrent flows; each user does not need a peer here. For example, 300 users averaging 2 Mbps at the same time require roughly 600 Mbps payload before tunnel overhead. Idle accounts consume very little compared with simultaneous downloads. Measure sustained throughput, packet loss, CPU, conntrack utilization and latency on the actual two-server route. Namespace correctness tests do not measure a provider's network or demonstrate 300-user capacity.
+CI on Ubuntu 22.04, 24.04 and 26.04 exercises real WireGuard forwarding, TCP/UDP selection, unequal and changed ports, peer failure, stopped interfaces, restart and cleanup. Assertions preserve ordinary IPv4/IPv6 routes, outbound access, unrelated forwarded LAN traffic and inbound sessions. A 300-request/40-worker correctness exercise is not a throughput or user-capacity guarantee.
 
 ## References
 
-- [Official WireGuard routing and namespaces](https://www.wireguard.com/netns/)
+- [WireGuard routing and namespaces](https://www.wireguard.com/netns/)
 - [wg-quick manual](https://git.zx2c4.com/wireguard-tools/about/src/man/wg-quick.8)
-- [WireGuard quick start](https://www.wireguard.com/quickstart/)
+- [iptables extensions: DNAT, SNAT and conntrack](https://man7.org/linux/man-pages/man8/iptables-extensions.8.html)

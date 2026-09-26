@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
 import socket
 import subprocess
@@ -19,7 +20,6 @@ import time
 
 VERSION = '0.3.0'
 MODE = 'port-forward-v1'
-DEFAULT_SERVICE_PORT = '8443'
 AUTHOR = 'alirezaw'
 GITHUB_URL = 'https://github.com/itsalirezaw'
 YOUTUBE_URL = 'https://www.youtube.com/@ialirezaw'
@@ -181,8 +181,10 @@ def keypair():
 
 
 def prompt(label, default=''):
-    suffix = f' [{default}]' if default else ''
-    return input(label+suffix+': ').strip() or default
+    print('  '+label)
+    if default:
+        print('  Press Enter to use '+styled(str(default), '1;33')+', or type a different value.')
+    return input(styled('  > ', '1;36')).strip() or default
 
 
 def styled(text, color='36'):
@@ -195,7 +197,7 @@ def heading(section, subtitle=''):
     width = max(24, min(72, shutil.get_terminal_size((76, 24)).columns-4))
     rule = '  '+'-'*width
     print('\n'+styled(rule))
-    print(styled('  WG BRIDGE', '1;36')+'  /  v'+VERSION)
+    print(styled('  WG BRIDGE', '1;36')+'  /  '+styled('v'+VERSION, '1;33'))
     print('  One port. Two servers. WireGuard transport.')
     print(styled(rule))
     print('  Built by '+AUTHOR)
@@ -213,6 +215,27 @@ def menu_option(number, label, detail='', color='36'):
     print('  '+styled('['+number+']', color)+'  '+label)
     if detail:
         print('       '+detail)
+
+
+def step(title, explanation):
+    print('\n  '+styled(title, '1;36'))
+    print('  '+explanation+'\n')
+
+
+def suggest_port(protocol='udp', exclude=()):
+    # Suggestions are convenience defaults, not a security boundary. Recheck
+    # the chosen transport/listen port before changing any network state.
+    for _ in range(128):
+        candidate = 20000+secrets.randbelow(40000)
+        if candidate in exclude:
+            continue
+        try:
+            for proto in (('tcp', 'udp') if protocol == 'both' else (protocol,)):
+                free_port(candidate, proto)
+        except BridgeError:
+            continue
+        return str(candidate)
+    raise BridgeError('Could not suggest an available port; check local listeners.')
 
 
 def detect_ip():
@@ -406,24 +429,37 @@ def install():
         raise BridgeError('Choose 1 or 2.')
     s = {'version': VERSION, 'mode': MODE, 'role': 'entry' if role == '1' else 'exit'}
     if s['role'] == 'entry':
-        print('Initialize Client (Outside) first to obtain its pairing code.')
-        # Hidden input prevents the pairing secret being copied into a screen recording.
-        import getpass
-        pairing = pairing_decode(getpass.getpass('Client (Outside) pairing code (hidden): '))
+        step('PAIR THE TWO SERVERS', 'Run option 2 on Outside first. Copy its entire WGB2 code, including the WGB2. prefix.')
+        pairing = pairing_decode(prompt('Paste the Outside pairing code (visible)'))
         s.update({'exit_ip': pairing['server_ip'], 'exit_port': pairing['server_port'],
                   'link_private': pairing['client_private'], 'peer_public': pairing['server_public'],
                   'psk': pairing['psk'], 'target_port': pairing['target_port'], 'protocol': pairing['protocol']})
-    s['public_ip'] = valid_ip(prompt('This server PUBLIC IPv4', detect_ip()))
-    label = 'UDP port (open it in the outside provider firewall)' if s['role'] == 'exit' else 'Local WireGuard UDP port'
-    s['port'] = valid_port(prompt(label, '51830' if s['role'] == 'exit' else '51831'))
+    location = 'Outside' if s['role'] == 'exit' else 'Iran'
+    step('THIS SERVER', 'Use the public IPv4 of this '+location+' server. The detected address is suggested below.')
+    s['public_ip'] = valid_ip(prompt(location+' server public IPv4', detect_ip()))
+    step('WIREGUARD CONNECTION', 'This UDP port carries the encrypted link between the servers; it is separate from the service port.')
+    if s['role'] == 'exit':
+        print('  Allow the selected UDP port in the Outside provider firewall.\n')
+    s['port'] = valid_port(prompt('WireGuard UDP port on '+location, suggest_port(exclude=(s.get('target_port'),))))
     s['wan'] = default_device()
     if s['role'] == 'exit':
-        s['target_port'] = valid_port(prompt('Service port on Outside', DEFAULT_SERVICE_PORT))
+        step('DESTINATION SERVICE', 'Enter the port your application uses on Outside, or accept a suggested free port and configure the application to use it.')
+        s['target_port'] = valid_port(prompt('Application port on Outside', suggest_port('both', (s['port'],))))
+        print('\n  TCP is used by most stream services; UDP is used by datagram services.')
+        print('  Choose both to forward either protocol on this one port.\n')
         s['protocol'] = valid_protocol(prompt('Forward protocol: tcp / udp / both', 'both').lower())
         if 'udp' in protocols(s) and s['target_port'] == s['port']:
             raise BridgeError('The service UDP port must differ from the WireGuard transport port.')
     else:
-        s['listen_port'] = valid_port(prompt('Public port on Iran to forward', str(s['target_port'])))
+        step('PUBLIC SERVICE PORT', 'Users connect to this port on Iran. Only these incoming connections are forwarded; other services keep their routes.')
+        print(f'  Outside destination: {EXIT_IP}:{s["target_port"]} ({s["protocol"]})\n')
+        suggested = str(s['target_port'])
+        try:
+            for proto in protocols(s): free_port(s['target_port'], proto)
+        except BridgeError:
+            suggested = suggest_port(s['protocol'], (s['port'],))
+            print('  The matching port is busy on Iran; a different free port is suggested.\n')
+        s['listen_port'] = valid_port(prompt('Public port on Iran to forward', suggested))
     conflicts(s)
     if s['role'] == 'exit':
         s['link_private'], server_public = keypair()
@@ -444,9 +480,11 @@ def install():
         print('Installation failed. Rolling back WG Bridge network changes.')
         uninstall(s, confirm=False, purge=False)
         raise
-    print('\nInstalled. Run: sudo wg-bridge')
+    print('\n'+styled('  SETUP COMPLETE', '1;32'))
+    print('  Open the menu anytime: '+styled('wg-bridge', '1;33'))
     print('Host Internet routes are unchanged. Only the selected IPv4 port is forwarded.')
     if s['role'] == 'exit':
+        print(f'The outside application must listen on 0.0.0.0:{s["target_port"]} or {EXIT_IP}:{s["target_port"]}.')
         print('\nPairing code: SECRET. Hide this part when recording a video. Use on ONE Iran server only.\n')
         print(s['pairing'])
         print('\nNow run the installer on Iran and choose 1) Server. Later: sudo wg-bridge status')
@@ -573,19 +611,20 @@ def change_port(s, value=None):
 def menu():
     s = load()
     heading('Tunnel management', role_label(s)+' | '+mapping(s))
+    print('  '+styled('OVERVIEW', '1'))
     menu_option('1', 'Status')
     menu_option('2', 'Diagnose connectivity')
-    print()
+    print('\n  '+styled('TUNNEL', '1'))
     menu_option('3', 'Restart tunnel')
     menu_option('4', 'Show pairing code', 'Available on Client (Outside); keep this code private.')
     menu_option('5', 'Stop tunnel', 'Only the forwarded port stops; other services keep their routes.')
     menu_option('6', 'Start tunnel')
-    print()
+    print('\n  '+styled('SETTINGS', '1'))
     menu_option('7', 'Uninstall completely', 'Remove WG Bridge, its tunnel configuration and keys.', '31')
     if s['role'] == 'entry':
         menu_option('8', 'Change public forwarding port', 'The outside service port and tunnel keys stay the same.')
     menu_option('0', 'Exit')
-    print()
+    print('\n  Open this menu anytime with '+styled('wg-bridge', '1;33')+'.\n')
     choice = prompt('  Select')
     if choice == '1': status(s)
     elif choice == '2': doctor(s)
