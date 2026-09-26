@@ -13,6 +13,16 @@ import wg_bridge as w
 
 
 class CoreTests(unittest.TestCase):
+    def test_legacy_state_keeps_topology(self):
+        old = {'role': 'client', 'server_ip': '8.8.8.8', 'server_port': 51830}
+        entry = w.normalize_state(old)
+        self.assertEqual(entry, {'role': 'entry', 'exit_ip': '8.8.8.8', 'exit_port': 51830})
+        self.assertEqual(old['role'], 'client')
+        self.assertEqual(w.normalize_state({'role': 'server'})['role'], 'exit')
+        self.assertEqual(w.role_label(entry), 'Server (Iran / entry)')
+        self.assertEqual(w.role_label(w.normalize_state({'role': 'server'})), 'Client (Outside / exit)')
+        with self.assertRaises(w.BridgeError): w.normalize_state({'role': 'unknown'})
+
     def payload(self):
         key = base64.b64encode(bytes(range(32))).decode()
         return dict(version=1, server_ip='8.8.8.8', server_port=51830,
@@ -56,17 +66,23 @@ class CoreTests(unittest.TestCase):
             self.assertNotIn('SECRET', str(caught.exception))
 
     def test_no_device_profiles_and_no_wg_quick_default_rule_ownership(self):
-        s = dict(role='client', link_private='PRIVATE', peer_public='PUBLIC', psk='PSK',
-                 port=51831, server_ip='8.8.8.8', server_port=51830)
+        s = dict(role='entry', link_private='PRIVATE', peer_public='PUBLIC', psk='PSK',
+                 port=51831, exit_ip='8.8.8.8', exit_port=51830)
         config = w.link_config(s)
         self.assertEqual(config.count('[Peer]'), 1)
         self.assertIn('Table = 52031', config)
         self.assertIn('ListenPort = 51831', config)
         self.assertNotIn('SaveConfig', config)
         self.assertNotIn('PostDown', config)
+        self.assertIn('Endpoint = 8.8.8.8:51830', config)
+        exit_state = dict(s, role='exit')
+        exit_config = w.link_config(exit_state)
+        self.assertNotIn('Endpoint =', exit_config)
+        self.assertNotIn('Table =', exit_config)
+        self.assertIn('AllowedIPs = 10.204.0.2/32, fd42:204::2/128', exit_config)
 
     def test_bypass_marks_keep_wireguard_bits(self):
-        s = dict(role='client', wan='eth0', ipv6=False)
+        s = dict(role='entry', wan='eth0', ipv6=False)
         rules = w.firewall_rules(s, 6)
         restore = [args for _, _, args in rules if '--restore-mark' in args]
         self.assertTrue(restore)

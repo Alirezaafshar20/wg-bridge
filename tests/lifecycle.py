@@ -6,6 +6,7 @@ Never run this test on an existing server. Namespace tests are the safe local te
 import contextlib
 import hashlib
 import io
+import json
 import os
 from pathlib import Path
 import stat
@@ -40,9 +41,9 @@ def main():
     absent()
     before = {k: w.run(['sysctl', '-n', k]) for k in ['net.ipv4.ip_forward', 'net.ipv6.conf.all.forwarding', 'net.ipv4.conf.all.rp_filter']}
     try:
-        call(['script', '-q', '-e', '-c', 'bash install.sh', '/dev/null'], '1\n8.8.8.8\n51830\n')
+        call(['script', '-q', '-e', '-c', 'bash install.sh', '/dev/null'], '2\n8.8.8.8\n51830\n')
         state = w.load()
-        assert state['role'] == 'server'
+        assert state['role'] == 'exit'
         assert w.pairing_decode(state['pairing'])['server_ip'] == '8.8.8.8'
         for name in ['wg-bridge-network', 'wg-quick@wgb-exit']:
             call(['systemctl', 'is-active', name]); call(['systemctl', 'is-enabled', name])
@@ -54,7 +55,20 @@ def main():
         call(['systemctl', 'stop', 'wg-quick@wgb-exit'])
         call(['systemctl', 'is-active', 'wg-bridge-network'])
         call(['systemctl', 'start', 'wg-quick@wgb-exit'])
-        call(['/usr/local/sbin/wg-bridge', 'uninstall'], 'REMOVE\n')
+        # Upgrade legacy role names without reversing topology or replacing keys.
+        legacy = dict(state, role='server', version='0.1.0')
+        w.save(w.STATE/'state.json', json.dumps(legacy))
+        state_bytes = (w.STATE/'state.json').read_bytes()
+        call(['bash', 'install.sh', '--upgrade'])
+        assert hashlib.sha256(config.read_bytes()).digest() == digest
+        assert (w.STATE/'state.json').read_bytes() == state_bytes
+        assert 'Client (Outside / exit)' in call(['/usr/local/sbin/wg-bridge', 'status'])
+        assert call(['/usr/local/sbin/wg-bridge', 'version']).strip() == w.VERSION
+        # A cancelled uninstall must preserve both network and manager.
+        call(['script', '-q', '-e', '-c', 'bash install.sh --uninstall', '/dev/null'], 'CANCEL\n')
+        assert config.exists() and w.APP.exists() and w.LAUNCHER.exists()
+        with contextlib.redirect_stdout(io.StringIO()):
+            w.uninstall(w.load(), confirm=False, purge=False)
         absent()
         assert all(w.run(['sysctl', '-n', k]) == v for k, v in before.items())
         # Fail after both units start; rollback must remove the partial install.
@@ -62,12 +76,17 @@ def main():
         def fail_services(state):
             real_services(state)
             raise w.BridgeError('injected service failure')
-        with patch.object(w, 'prompt', side_effect=['1', '8.8.8.8', '51830']), patch.object(w, 'detect_ip', return_value=''), patch.object(w, 'services', side_effect=fail_services), contextlib.redirect_stdout(io.StringIO()):
+        with patch.object(w, 'prompt', side_effect=['2', '8.8.8.8', '51830']), patch.object(w, 'detect_ip', return_value=''), patch.object(w, 'services', side_effect=fail_services), contextlib.redirect_stdout(io.StringIO()):
             try: w.install()
             except w.BridgeError as exc: assert str(exc) == 'injected service failure'
             else: raise AssertionError('Expected failure did not occur')
         absent()
-        print('PASS: actual installer, persistent systemd units, idempotent rerun, stop/start, uninstall and rollback')
+        assert w.APP.exists() and w.LAUNCHER.exists()
+        call(['script', '-q', '-e', '-c', 'bash install.sh', '/dev/null'], '2\n8.8.8.8\n51830\n')
+        call(['script', '-q', '-e', '-c', 'bash install.sh --uninstall', '/dev/null'], 'REMOVE\n')
+        absent()
+        assert not w.APP.exists() and not w.LAUNCHER.exists()
+        print('PASS: installer, systemd, stop/start, legacy upgrade, cancellation, rollback and complete uninstall')
     finally:
         if (w.STATE/'state.json').exists():
             with contextlib.redirect_stdout(io.StringIO()): w.uninstall(w.load(), confirm=False)

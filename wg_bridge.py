@@ -17,10 +17,11 @@ import sys
 import tempfile
 import time
 
-VERSION = '0.1.0'
+VERSION = '0.2.0'
 STATE = Path('/etc/wg-bridge')
 WG = Path('/etc/wireguard')
 APP = Path('/usr/local/lib/wg-bridge/wg_bridge.py')
+LAUNCHER = Path('/usr/local/sbin/wg-bridge')
 UNIT = Path('/etc/systemd/system/wg-bridge-network.service')
 LINK = 'wgb-exit'
 BLOCK = 'wgb-block'
@@ -68,9 +69,26 @@ def save(path, content, mode=0o600):
 
 def load():
     try:
-        return json.loads((STATE/'state.json').read_text())
+        return normalize_state(json.loads((STATE/'state.json').read_text()))
     except FileNotFoundError:
         raise BridgeError('Not installed. Run the installer first.') from None
+
+
+def normalize_state(s):
+    """v0.1 named transport roles; v0.2 persists unambiguous topology roles."""
+    s = dict(s)
+    s['role'] = {'server': 'exit', 'client': 'entry'}.get(s.get('role'), s.get('role'))
+    if s['role'] not in ('entry', 'exit'):
+        raise BridgeError('Unknown installation role; refusing to alter routing.')
+    if 'server_ip' in s:
+        s['exit_ip'] = s.pop('server_ip')
+    if 'server_port' in s:
+        s['exit_port'] = s.pop('server_port')
+    return s
+
+
+def role_label(s):
+    return 'Server (Iran / entry)' if s['role'] == 'entry' else 'Client (Outside / exit)'
 
 
 def persist(s):
@@ -198,16 +216,16 @@ def conflicts(port):
 
 
 def link_config(s):
-    server = s['role'] == 'server'
-    address = '10.204.0.1/30, fd42:204::1/64' if server else '10.204.0.2/30, fd42:204::2/64'
-    allowed = '10.204.0.2/32, fd42:204::2/128' if server else '0.0.0.0/0, ::/0'
+    exit_peer = s['role'] == 'exit'
+    address = '10.204.0.1/30, fd42:204::1/64' if exit_peer else '10.204.0.2/30, fd42:204::2/64'
+    allowed = '10.204.0.2/32, fd42:204::2/128' if exit_peer else '0.0.0.0/0, ::/0'
     text = f'[Interface]\nPrivateKey = {s["link_private"]}\nAddress = {address}\nMTU = 1380\n'
     text += f'ListenPort = {s["port"]}\n'
-    if not server:
+    if not exit_peer:
         text += f'Table = {TABLE}\nFwMark = {TABLE}\n'
     text += f'\n[Peer]\nPublicKey = {s["peer_public"]}\nPresharedKey = {s["psk"]}\nAllowedIPs = {allowed}\n'
-    if not server:
-        text += f'Endpoint = {s["server_ip"]}:{s["server_port"]}\nPersistentKeepalive = 25\n'
+    if not exit_peer:
+        text += f'Endpoint = {s["exit_ip"]}:{s["exit_port"]}\nPersistentKeepalive = 25\n'
     return text
 
 
@@ -216,7 +234,7 @@ def firewall_rules(s, version):
     rules = []
     def add(chain, args, table='filter'):
         rules.append((table, chain, args.split()))
-    if s['role'] == 'server':
+    if s['role'] == 'exit':
         if version == 4:
             add('WGB_IN', f'-p udp --dport {s["port"]} -j ACCEPT')
         if version == 4 or s['ipv6']:
@@ -260,7 +278,7 @@ def policy_rules(s, version):
     if s.get('ssh_peer') and ipaddress.ip_address(s['ssh_peer']).version == version:
         rules.insert(0, ['priority', '12127', 'to', s['ssh_peer']+('/32' if version == 4 else '/128'), 'table', 'main'])
     if version == 4:
-        rules.append(['priority', '12129', 'to', s['server_ip']+'/32', 'table', 'main'])
+        rules.append(['priority', '12129', 'to', s['exit_ip']+'/32', 'table', 'main'])
     rules.append(['priority', '12130', 'table', 'main', 'suppress_prefixlength', '0'])
     rules.append(['priority', PRIORITY, 'not', 'fwmark', TABLE, 'table', TABLE])
     return rules
@@ -270,7 +288,7 @@ def network(s, up):
     # An always-present sink route lets OUTPUT restore incoming connection marks
     # before routing their replies to WAN. An unreachable route would fail before
     # OUTPUT, breaking incoming SSH whenever the WG interface disappeared.
-    if s['role'] == 'client' and up:
+    if s['role'] == 'entry' and up:
         if run(['ip', 'link', 'show', BLOCK], check=False).returncode:
             run(['ip', 'link', 'add', BLOCK, 'type', 'dummy'])
         run(['ip', 'link', 'set', BLOCK, 'up'])
@@ -288,7 +306,7 @@ def network(s, up):
             for table, parent, chain in CHAINS:
                 if run([tool, '-w', '-t', table, '-C', parent, '-j', chain], check=False).returncode:
                     run([tool, '-w', '-t', table, '-I', parent, '1', '-j', chain])
-        if s['role'] == 'client':
+        if s['role'] == 'entry':
             if up:
                 # Preserve already-established inbound sessions before changing routing.
                 for dev in json.loads(run(['ip', '-j', f'-{version}', 'addr', 'show', 'dev', s['wan']])):
@@ -307,7 +325,7 @@ def network(s, up):
                     run([tool, '-w', '-t', table, '-D', parent, '-j', chain])
                 run([tool, '-w', '-t', table, '-F', chain], check=False)
                 run([tool, '-w', '-t', table, '-X', chain], check=False)
-    if not up and s['role'] == 'client':
+    if not up and s['role'] == 'entry':
         run(['ip', 'link', 'del', BLOCK], check=False)
     if up:
         # Preserve providers' SLAAC routes. Loose rp_filter accepts the VPN return path.
@@ -365,30 +383,31 @@ def install():
         return menu()
     if STATE.exists() and any(STATE.iterdir()):
         raise BridgeError('/etc/wg-bridge contains an incomplete install. Inspect it before retrying.')
-    print('\nWG Bridge '+VERSION+'\n1) Server (outside / kharej)\n2) Client (Iran / entry)')
+    print('\nWG Bridge '+VERSION+'\n1) Server (Iran / entry)\n2) Client (Outside / exit)')
     role = prompt('Select [1/2]')
     if role not in ['1', '2']:
         raise BridgeError('Choose 1 or 2.')
-    s = {'version': VERSION, 'role': 'server' if role == '1' else 'client'}
+    s = {'version': VERSION, 'role': 'entry' if role == '1' else 'exit'}
     ssh_peer = os.environ.get('WGB_SSH_PEER') or os.environ.get('SSH_CONNECTION', '').split(' ')[0]
     if ssh_peer:
         try:
             s['ssh_peer'] = str(ipaddress.ip_address(ssh_peer))
         except ValueError:
             raise BridgeError('Cannot validate the current SSH address; reconnect using a standard SSH session.') from None
-    if role == '2':
+    if s['role'] == 'entry':
+        print('Initialize Client (Outside) first to obtain its pairing code.')
         # Hidden input prevents the pairing secret being copied into a screen recording.
         import getpass
-        pairing = pairing_decode(getpass.getpass('Paste outside-server pairing code (hidden): '))
-        s.update({'server_ip': pairing['server_ip'], 'server_port': pairing['server_port'],
+        pairing = pairing_decode(getpass.getpass('Client (Outside) pairing code (hidden): '))
+        s.update({'exit_ip': pairing['server_ip'], 'exit_port': pairing['server_port'],
                   'link_private': pairing['client_private'], 'peer_public': pairing['server_public'],
                   'psk': pairing['psk'], 'ipv6': pairing['ipv6']})
     s['public_ip'] = valid_ip(prompt('This server PUBLIC IPv4', detect_ip()))
-    label = 'UDP port (open it in the outside provider firewall)' if role == '1' else 'Local WireGuard UDP port'
-    s['port'] = valid_port(prompt(label, '51830' if role == '1' else '51831'))
+    label = 'UDP port (open it in the outside provider firewall)' if s['role'] == 'exit' else 'Local WireGuard UDP port'
+    s['port'] = valid_port(prompt(label, '51830' if s['role'] == 'exit' else '51831'))
     s['wan'] = default_device()
     conflicts(s['port'])
-    if role == '1':
+    if s['role'] == 'exit':
         s['link_private'], server_public = keypair()
         client_private, s['peer_public'] = keypair()
         s['psk'] = run(['wg', 'genpsk'])
@@ -406,15 +425,15 @@ def install():
         services(s)
     except (Exception, KeyboardInterrupt):
         print('Installation failed. Rolling back WG Bridge network changes.')
-        uninstall(s, confirm=False)
+        uninstall(s, confirm=False, purge=False)
         raise
     print('\nInstalled. Run: sudo wg-bridge')
     if not s['ipv6']:
         print('Outside IPv6 is unavailable: outbound IPv6 Internet traffic will be blocked, not bypass the tunnel.')
-    if role == '1':
+    if s['role'] == 'exit':
         print('\nPairing code: SECRET. Hide this part when recording a video. Use on ONE Iran server only.\n')
         print(s['pairing'])
-        print('\nNow run the same installer on Iran and choose 2. Later: sudo wg-bridge status')
+        print('\nNow run the installer on Iran and choose 1) Server. Later: sudo wg-bridge status')
     else:
         if not doctor(s):
             print('Installed but NOT connected. Fix the reported issue, then run: sudo wg-bridge doctor')
@@ -422,7 +441,7 @@ def install():
 
 def status(s):
     os.environ['WG_HIDE_KEYS'] = 'always'
-    print('WG Bridge '+VERSION+' | role: '+s['role'])
+    print('WG Bridge '+VERSION+' | '+role_label(s))
     for iface in [LINK]:
         result = run(['wg', 'show', iface], check=False)
         print(result.stdout if result.returncode == 0 else iface+': DOWN')
@@ -435,7 +454,7 @@ def doctor(s):
         if run(['systemctl', 'is-active', unit], check=False).returncode:
             print(unit+': NOT ACTIVE. Start the tunnel from the menu; inspect journalctl -u '+unit)
             return False
-    if s['role'] == 'server':
+    if s['role'] == 'exit':
         status(s)
         print('If Iran cannot connect: check UDP '+str(s['port'])+' in the provider firewall.')
         return True
@@ -446,7 +465,7 @@ def doctor(s):
             break
         time.sleep(1)
     else:
-        print('NO HANDSHAKE: verify the pairing code, server IP, UDP '+str(s['server_port'])+', and network filtering.')
+        print('NO HANDSHAKE: verify the pairing code, outside IP, UDP '+str(s['exit_port'])+', and network filtering.')
         return False
     good = True
     families = [(4, 'https://api.ipify.org')]
@@ -467,8 +486,8 @@ def doctor(s):
     return good
 
 
-def uninstall(s, confirm=True):
-    if confirm and prompt('Type REMOVE to stop WG Bridge and delete its keys') != 'REMOVE':
+def uninstall(s, confirm=True, purge=True):
+    if confirm and prompt('Type REMOVE to uninstall WG Bridge and delete its keys') != 'REMOVE':
         print('Cancelled.')
         return
     names = [LINK]
@@ -493,12 +512,28 @@ def uninstall(s, confirm=True):
     if STATE.resolve() != Path('/etc/wg-bridge') or STATE.is_symlink():
         raise BridgeError('Unexpected state path; refusing recursive removal.')
     shutil.rmtree(STATE)
-    print('WG Bridge tunnel and keys removed. Shared system packages are kept.')
+    if purge:
+        remove_program()
+        print('WG Bridge removed. Shared distribution packages retained.')
+    else:
+        print('Tunnel configuration removed; manager retained.')
+
+
+def remove_program():
+    # Delete only the two files installed by this project; never recurse through
+    # a shared executable directory or an unexpected application directory.
+    if APP.parent.resolve() != Path('/usr/local/lib/wg-bridge') or APP.parent.is_symlink():
+        raise BridgeError('Unexpected application path; refusing program removal.')
+    APP.unlink(missing_ok=True)
+    LAUNCHER.unlink(missing_ok=True)
+    with contextlib.suppress(OSError):
+        APP.parent.rmdir()
 
 
 def menu():
     s = load()
-    print('\n1) Status\n2) Diagnose\n3) Restart tunnel\n4) Show pairing code (outside only)\n5) Stop tunnel (Internet blocked; inbound SSH preserved)\n6) Start tunnel\n7) Uninstall\n0) Exit')
+    print('\nWG Bridge '+VERSION+' | '+role_label(s))
+    print('\n1) Status\n2) Diagnose\n3) Restart tunnel\n4) Pairing code (Client / Outside)\n5) Stop tunnel (Internet blocked; inbound SSH preserved)\n6) Start tunnel\n7) Uninstall completely\n0) Exit')
     choice = prompt('Select')
     if choice == '1': status(s)
     elif choice == '2': doctor(s)
@@ -507,7 +542,7 @@ def menu():
         run(['systemctl', 'restart' if choice == '3' else 'start', 'wg-quick@'+LINK])
         doctor(s)
     elif choice == '4':
-        if s['role'] != 'server': raise BridgeError('Run this on the outside server.')
+        if s['role'] != 'exit': raise BridgeError('Run this on Client (Outside).')
         print('SECRET: '+s['pairing'])
     elif choice == '5':
         run(['systemctl', 'stop', 'wg-quick@'+LINK])
@@ -517,7 +552,7 @@ def menu():
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Two-hop WireGuard: outside server + Iran entry')
+    parser = argparse.ArgumentParser(description='WG Bridge: Server (Iran / entry) and Client (Outside / exit)')
     parser.add_argument('command', nargs='?', default='menu', choices=['menu','install','status','doctor','uninstall','_network','version'])
     parser.add_argument('argument', nargs='?')
     args = parser.parse_args()

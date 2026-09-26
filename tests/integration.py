@@ -159,8 +159,8 @@ for line in sys.stdin:
     client_private, client_public = w.keypair()
     psk = w.run(['wg', 'genpsk'])
     states = {
-        'out': dict(role='server', wan='wan0', ipv6=True, port=51830, link_private=server_private, peer_public=client_public, psk=psk),
-        'ir': dict(role='client', wan='wan0', ipv6=True, port=51831, link_private=client_private, peer_public=server_public, psk=psk, server_ip='198.51.100.2', server_port=51830)
+        'out': dict(role='exit', wan='wan0', ipv6=True, port=51830, link_private=server_private, peer_public=client_public, psk=psk),
+        'ir': dict(role='entry', wan='wan0', ipv6=True, port=51831, link_private=client_private, peer_public=server_public, psk=psk, exit_ip='198.51.100.2', exit_port=51830)
     }
     for name, state in states.items():
         w.save(folder/name/'state.json', json.dumps(state))

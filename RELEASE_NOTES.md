@@ -1,32 +1,22 @@
-# WG Bridge v0.1.0 — initial preview
+# WG Bridge v0.2.0
 
-An independent WireGuard tunnel between two servers. Select Server on the outside exit and Client on the Iran entry. No panel or end-user VPN profiles are created.
+- **Server (Iran)** is the ingress and panel host; **Client (Outside)** provides Internet egress.
+- New installations use explicit `entry`/`exit` state. Existing v0.1 roles and pairing codes remain compatible; the transport direction and routing are preserved.
+- `install.sh --upgrade` updates the manager without replacing keys or restarting the tunnel.
+- Full uninstall removes owned network configuration, keys, services, manager and launcher. Use the menu, `wg-bridge uninstall` or `install.sh --uninstall`.
+- English and Persian documentation now use separate Requirements and Install commands with operational details in dedicated sections.
 
-- Automatic dependency installation, key generation and setup through a secret pairing code.
-- Internet egress through the outside server, with incoming connections' reply paths preserved.
-- IPv4 and IPv6, with outgoing IPv6 blocked when the exit has no IPv6 route.
-- Automatic startup, status, diagnostics, safe stop, restart and uninstall.
-- English documentation by default, a complete Persian guide and a Persian video outline.
+Validation includes real WireGuard network tests and Ubuntu 22.04/24.04 installer lifecycle tests, including legacy upgrade, removal cancellation, rollback and full uninstall. This remains a preview release; correctness tests do not establish production throughput or user capacity.
 
-Real WireGuard namespace tests cover TCP/UDP, IPv4/IPv6, forwarded traffic, existing/new incoming TCP, tunnel stop/restart, IPv6 blocking and cleanup. 300 HTTP requests with 40 workers test routing correctness; they are not a production capacity benchmark. CI also exercises actual installer/systemd lifecycle on disposable Ubuntu VMs.
-
-This is the initial preview release. Plain WireGuard requires a working UDP path; it does not provide transport obfuscation. One pairing code is for exactly one server pair. Existing policy-routing VPNs and active firewalld are rejected. Read the routing exceptions and integration limits before deployment.
-
-[English installation guide](https://github.com/Alirezaafshar20/wg-bridge#readme) · [راهنمای فارسی](https://github.com/Alirezaafshar20/wg-bridge/blob/main/README.fa.md)
+[English documentation](https://github.com/Alirezaafshar20/wg-bridge#readme) · [فارسی](https://github.com/Alirezaafshar20/wg-bridge/blob/main/README.fa.md) · [Changelog](https://github.com/Alirezaafshar20/wg-bridge/blob/main/CHANGELOG.md)
 
 <details>
 <summary>توضیحات فارسی</summary>
 
-تانل مستقل WireGuard بین دو سرور، با نصب سادهٔ Server روی خارج و Client روی ایران. هیچ پنل یا کانفیگ کاربری ساخته نمی‌شود.
+در نسخهٔ 0.2، ایران با نقش Server و خارج با نقش Client نمایش داده می‌شوند. مسیر ترافیک و جهت آغاز ارتباط WireGuard حفظ شده‌اند و تنظیمات نسخهٔ قبلی همچنان سازگارند.
 
-- نصب وابستگی‌ها، تولید کلید و انتقال تنظیمات با کد اتصال محرمانه.
-- خروج ترافیک عادی ایران و شبکه‌های پشت آن از خارج؛ حفظ مسیر پاسخ اتصال‌های ورودی.
-- IPv4 و IPv6، یا مسدودکردن خروج IPv6 در صورت نبود مسیر خارج.
-- شروع خودکار، وضعیت، عیب‌یابی، توقف امن، شروع مجدد و حذف تنظیمات.
-- راهنمای انگلیسی پیش‌فرض، راهنمای کامل فارسی و طرح ویدیوی آموزشی فارسی.
+ارتقای مدیر بدون تعویض کلیدها یا راه‌اندازی مجدد تانل انجام می‌شود. حذف کامل از منو، فرمان `wg-bridge uninstall` و گزینهٔ `--uninstall` نصب‌کننده در دسترس است. راهنماهای فارسی و انگلیسی بازنویسی شده‌اند و Requirements و Install دستورهای جدا دارند.
 
-آزمون‌ها شامل TCP/UDP، IPv4/IPv6، ترافیک عبوری، حفظ اتصال‌های ورودی، توقف و شروع مجدد، مسدودکردن IPv6 و پاک‌سازی هستند. تست ۳۰۰ درخواست با ۴۰ worker، بنچمارک ظرفیت کاربران واقعی نیست. نصب و سرویس‌های systemd هم روی ماشین‌های آزمایشی Ubuntu بررسی می‌شوند.
-
-این اولین نسخهٔ آزمایشی است. ارتباط نیازمند مسیر UDP سالم است و استتار ترافیک ندارد. هر کد اتصال فقط برای یک جفت سرور است. VPN دارای policy routing و firewalld فعال پذیرفته نمی‌شوند؛ پیش از نصب، محدودیت‌ها و مسیرهای مستثنا را بخوانید.
+تست‌های شبکه و نصب روی Ubuntu 22.04 و 24.04 شامل سازگاری نسخهٔ قبلی، لغو حذف، بازگردانی نصب ناموفق و حذف کامل هستند. این انتشار همچنان آزمایشی است؛ آزمون درستی عملکرد، ظرفیت مصرف واقعی را تضمین نمی‌کند.
 
 </details>

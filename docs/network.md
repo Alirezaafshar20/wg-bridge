@@ -1,6 +1,8 @@
 # Network design
 
-The outside host is `Server`; the Iran host is `Client`. These names describe tunnel establishment, not the roles of panel users. The client initiates UDP, and the server learns its endpoint. One pairing code provisions exactly one pair.
+The Iran ingress host is **Server**; the outside egress host is **Client**. These are deployment roles, independent of WireGuard’s peer-to-peer transport. Iran initiates UDP toward the outside endpoint, which learns the Iran endpoint. Initialize the outside Client first to generate the pairing code, then configure the Iran Server. One code provisions exactly one pair.
+
+Internally, persisted roles are `entry` and `exit`. The manager reads v0.1 `client` as `entry` and v0.1 `server` as `exit`, preserving the original routing behavior. The version-1 pairing format is retained for compatibility; its historical field names describe the transport endpoint, not the current menu labels.
 
 ## Resources owned by WG Bridge
 
@@ -29,11 +31,11 @@ Exceptions consult the existing main route table:
 - non-default routes already present in the main table, including connected/provider/private networks;
 - WireGuard UDP transport carrying its fwmark.
 
-The SSH source exception remains until uninstall, including new egress to that same IP. These exceptions mean “all traffic” is not literal. Applications that intentionally bind special devices or use custom routing/marks need separate validation. Inbound WAN forwarding/DNAT and TProxy are outside the first release's automatic configuration scope.
+The SSH source exception remains until uninstall, including new egress to that same IP. These exceptions mean “all traffic” is not literal. Applications that intentionally bind special devices or use custom routing/marks need separate validation. Inbound WAN forwarding/DNAT and TProxy are outside the automatic configuration scope.
 
 A persistent default to the dummy discard interface `wgb-block`, metric 32767, remains in table 52031 when the WG interface disappears. Active WireGuard defaults have a lower metric. Filter rules reject output/forwarding to the dummy; the interface itself cannot transmit externally. This supplies an initial route so the OUTPUT connection-mark restoration can still reroute incoming SSH replies onto WAN. An unreachable route would fail before OUTPUT and break these replies. Stopping or losing the interface cannot fall through to the main default for traffic assigned to the tunnel. The fallback does not detect peer failure: packets then stay assigned to the unresponsive tunnel and time out. Stopping only wg-quick retains the block; uninstalling the network service deliberately removes the policy.
 
-Outside IPv6 support is inferred from a default route and checked during client diagnosis. If absent, entry output/forwarding toward the IPv6 Internet is rejected. Internal link IPv6 and the main-table exceptions still exist. Disabled kernel IPv6 is not supported. NAT66 is used when exit IPv6 is available.
+Outside IPv6 support is inferred from a default route and checked during Iran Server diagnosis. If absent, entry output/forwarding toward the IPv6 Internet is rejected. Internal link IPv6 and the main-table exceptions still exist. Disabled kernel IPv6 is not supported. NAT66 is used when exit IPv6 is available.
 
 ## Persistence and integration boundaries
 
