@@ -17,7 +17,9 @@ import sys
 import tempfile
 import time
 
-VERSION = '0.2.2'
+VERSION = '0.3.0'
+MODE = 'port-forward-v1'
+DEFAULT_SERVICE_PORT = '8443'
 AUTHOR = 'alirezaw'
 GITHUB_URL = 'https://github.com/itsalirezaw'
 YOUTUBE_URL = 'https://www.youtube.com/@ialirezaw'
@@ -27,13 +29,9 @@ APP = Path('/usr/local/lib/wg-bridge/wg_bridge.py')
 LAUNCHER = Path('/usr/local/sbin/wg-bridge')
 UNIT = Path('/etc/systemd/system/wg-bridge-network.service')
 LINK = 'wgb-exit'
-BLOCK = 'wgb-block'
-TABLE = '52031'
-PRIORITY = '12131'
 V4_LINK = '10.204.0.0/30'
-V6_LINK = 'fd42:204::/64'
-NETS = ((4, V4_LINK), (6, V6_LINK))
-BYPASS = '0x40000000/0x40000000'
+ENTRY_IP = '10.204.0.2'
+EXIT_IP = '10.204.0.1'
 
 
 class BridgeError(Exception):
@@ -78,15 +76,18 @@ def load():
 
 
 def normalize_state(s):
-    """v0.1 named transport roles; v0.2 persists unambiguous topology roles."""
     s = dict(s)
-    s['role'] = {'server': 'exit', 'client': 'entry'}.get(s.get('role'), s.get('role'))
-    if s['role'] not in ('entry', 'exit'):
-        raise BridgeError('Unknown installation role; refusing to alter routing.')
-    if 'server_ip' in s:
-        s['exit_ip'] = s.pop('server_ip')
-    if 'server_port' in s:
-        s['exit_port'] = s.pop('server_port')
+    if s.get('mode') != MODE:
+        raise BridgeError('Legacy full-routing installation. Uninstall with the old manager, then install v0.3 on both hosts; Outside first.')
+    if s.get('role') not in ('entry', 'exit'):
+        raise BridgeError('Unknown installation role; refusing to alter networking.')
+    s['protocol'] = valid_protocol(s['protocol'])
+    s['target_port'] = valid_port(s['target_port'])
+    s['port'] = valid_port(s['port'])
+    if s['role'] == 'entry':
+        s['listen_port'] = valid_port(s['listen_port'])
+        s['exit_ip'] = valid_ip(s['exit_ip'])
+        s['exit_port'] = valid_port(s['exit_port'])
     return s
 
 
@@ -134,25 +135,39 @@ def valid_ip(value):
     return str(addr)
 
 
+def valid_protocol(value):
+    if value not in ('tcp', 'udp', 'both'):
+        raise BridgeError('Protocol must be tcp, udp or both.')
+    return value
+
+
+def protocols(s):
+    return ('tcp', 'udp') if s['protocol'] == 'both' else (s['protocol'],)
+
+
 def pairing_encode(payload):
     raw = json.dumps(payload, sort_keys=True, separators=(',', ':')).encode()
-    return 'WGB1.'+base64.urlsafe_b64encode(raw).decode().rstrip('=')+'.'+hashlib.sha256(raw).hexdigest()[:16]
+    return 'WGB2.'+base64.urlsafe_b64encode(raw).decode().rstrip('=')+'.'+hashlib.sha256(raw).hexdigest()[:16]
 
 
 def pairing_decode(code):
     if len(code) > 4096:
         raise BridgeError('Pairing code is too long.')
+    if code.strip().startswith('WGB1.'):
+        raise BridgeError('WGB1 is the old full-routing mode. Reinstall Outside with v0.3 and use its new WGB2 code.')
     try:
         prefix, encoded, checksum = code.strip().split('.')
         raw = base64.b64decode(encoded+'='*(-len(encoded) % 4), altchars=b'-_', validate=True)
         p = json.loads(raw)
-        expected = {'version', 'server_ip', 'server_port', 'server_public', 'client_private', 'psk', 'ipv6'}
-        if prefix != 'WGB1' or hashlib.sha256(raw).hexdigest()[:16] != checksum:
+        expected = {'version', 'server_ip', 'server_port', 'server_public', 'client_private', 'psk', 'target_port', 'protocol'}
+        if prefix != 'WGB2' or hashlib.sha256(raw).hexdigest()[:16] != checksum:
             raise ValueError()
-        if not isinstance(p, dict) or set(p) != expected or type(p['version']) is not int or p['version'] != 1 or type(p['ipv6']) is not bool:
+        if not isinstance(p, dict) or set(p) != expected or type(p['version']) is not int or p['version'] != 2:
             raise ValueError()
         p['server_ip'] = valid_ip(p['server_ip'])
-        p['server_port'] = valid_port(p['server_port'])
+        for field in ['server_port', 'target_port']:
+            p[field] = valid_port(p[field])
+        p['protocol'] = valid_protocol(p['protocol'])
         for k in ['server_public', 'client_private', 'psk']:
             valid_key(p[k])
         return p
@@ -181,7 +196,7 @@ def heading(section, subtitle=''):
     rule = '  '+'-'*width
     print('\n'+styled(rule))
     print(styled('  WG BRIDGE', '1;36')+'  /  v'+VERSION)
-    print('  Server-to-server WireGuard tunnel')
+    print('  One port. Two servers. WireGuard transport.')
     print(styled(rule))
     print('  Built by '+AUTHOR)
     print('  GitHub   '+GITHUB_URL)
@@ -219,151 +234,113 @@ def default_device():
     return device
 
 
-def conflicts(port):
-    for name in [LINK, BLOCK]:
-        if (WG/(name+'.conf')).exists() or run(['ip', 'link', 'show', name], check=False).returncode == 0:
-            raise BridgeError(f'{name} already exists; refusing to replace it.')
-    for version, link_net in NETS:
-        wanted = [ipaddress.ip_network(link_net)]
-        for route in json.loads(run(['ip', '-j', f'-{version}', 'route', 'show', 'table', 'all'])):
-            dst = route.get('dst', 'default')
-            if dst in ['default', 'all']:
-                continue
-            with contextlib.suppress(ValueError):
-                if any(ipaddress.ip_network(dst, strict=False).overlaps(n) for n in wanted):
-                    raise BridgeError(f'Address conflict with {dst}. Use a clean server or resolve the overlap first.')
-        rules = json.loads(run(['ip', '-j', f'-{version}', 'rule']))
-        if any(r.get('priority') not in [0, 32766, 32767] for r in rules):
-            raise BridgeError('Existing policy routing detected. This release requires a host without another policy-routing VPN.')
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+def free_port(port, protocol):
+    kind = socket.SOCK_STREAM if protocol == 'tcp' else socket.SOCK_DGRAM
+    with socket.socket(socket.AF_INET, kind) as sock:
         try:
             sock.bind(('0.0.0.0', port))
         except OSError:
-            raise BridgeError(f'UDP port {port} is already in use. Choose another port.') from None
-    for tool in ['iptables', 'ip6tables']:
-        for table, _, chain in CHAINS:
-            if run([tool, '-w', '-t', table, '-S', chain], check=False).returncode == 0:
-                raise BridgeError('Existing WGB firewall chains found; investigate before installing.')
+            raise BridgeError(f'{protocol.upper()} port {port} is already in use. Choose another port.') from None
+
+
+def conflicts(s):
+    for name in [LINK, 'wgb-block']:
+        if (WG/(name+'.conf')).exists() or run(['ip', 'link', 'show', name], check=False).returncode == 0:
+            raise BridgeError(f'{name} already exists; refusing to replace it.')
+    for route in json.loads(run(['ip', '-j', '-4', 'route', 'show', 'table', 'all'])):
+        dst = route.get('dst', 'default')
+        if dst in ['default', 'all']: continue
+        with contextlib.suppress(ValueError):
+            if ipaddress.ip_network(dst, strict=False).overlaps(ipaddress.ip_network(V4_LINK)):
+                raise BridgeError(f'Address conflict with {dst}. Resolve the overlap before installing.')
+    # Custom policy routing can redirect the private peer or UDP transport.
+    if any(r.get('priority') not in [0, 32766, 32767] for r in json.loads(run(['ip', '-j', '-4', 'rule']))):
+        raise BridgeError('Existing IPv4 policy routing requires manual integration.')
+    free_port(s['port'], 'udp')
+    if s['role'] == 'entry':
+        check_listener(s)
+    for table, _, chain in CHAINS:
+        if run(['iptables', '-w', '-t', table, '-S', chain], check=False).returncode == 0:
+            raise BridgeError('Existing WGB firewall chains found; investigate before installing.')
     if UNIT.exists() or Path('/etc/systemd/system/wg-quick@wgb-exit.service.d/wg-bridge.conf').exists():
         raise BridgeError('Existing WG Bridge systemd files found; investigate before installing.')
 
 
+def check_listener(s):
+    if 'udp' in protocols(s) and s['listen_port'] == s['port']:
+        raise BridgeError('The forwarded UDP port must differ from the WireGuard transport port.')
+    for protocol in protocols(s):
+        free_port(s['listen_port'], protocol)
+
+
 def link_config(s):
-    exit_peer = s['role'] == 'exit'
-    address = '10.204.0.1/30, fd42:204::1/64' if exit_peer else '10.204.0.2/30, fd42:204::2/64'
-    allowed = '10.204.0.2/32, fd42:204::2/128' if exit_peer else '0.0.0.0/0, ::/0'
-    text = f'[Interface]\nPrivateKey = {s["link_private"]}\nAddress = {address}\nMTU = 1380\n'
-    text += f'ListenPort = {s["port"]}\n'
-    if not exit_peer:
-        text += f'Table = {TABLE}\nFwMark = {TABLE}\n'
-    text += f'\n[Peer]\nPublicKey = {s["peer_public"]}\nPresharedKey = {s["psk"]}\nAllowedIPs = {allowed}\n'
-    if not exit_peer:
+    outside = s['role'] == 'exit'
+    local, peer = (EXIT_IP, ENTRY_IP) if outside else (ENTRY_IP, EXIT_IP)
+    text = f'[Interface]\nPrivateKey = {s["link_private"]}\nAddress = {local}/30\nMTU = 1380\n'
+    text += f'ListenPort = {s["port"]}\nTable = off\n'
+    text += f'\n[Peer]\nPublicKey = {s["peer_public"]}\nPresharedKey = {s["psk"]}\nAllowedIPs = {peer}/32\n'
+    if not outside:
         text += f'Endpoint = {s["exit_ip"]}:{s["exit_port"]}\nPersistentKeepalive = 25\n'
     return text
 
 
-def firewall_rules(s, version):
-    linknet = V4_LINK if version == 4 else V6_LINK
+CHAINS = [('filter', 'INPUT', 'WGB_IN'), ('filter', 'FORWARD', 'WGB_FWD'),
+          ('nat', 'PREROUTING', 'WGB_DNAT'), ('nat', 'POSTROUTING', 'WGB_NAT'),
+          ('mangle', 'FORWARD', 'WGB_MSS')]
+
+
+def firewall_rules(s):
     rules = []
     def add(chain, args, table='filter'):
         rules.append((table, chain, args.split()))
-    if s['role'] == 'exit':
-        if version == 4:
-            add('WGB_IN', f'-p udp --dport {s["port"]} -j ACCEPT')
-        if version == 4 or s['ipv6']:
-            add('WGB_FWD', f'-i {LINK} -o {s["wan"]} -s {linknet} -j ACCEPT')
-            add('WGB_FWD', f'-i {s["wan"]} -o {LINK} -d {linknet} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT')
-            add('WGB_NAT', f'-s {linknet} -o {s["wan"]} -j MASQUERADE', 'nat')
-        add('WGB_FWD', f'-i {LINK} -j REJECT')
-        add('WGB_FWD', f'-o {LINK} -j REJECT')
+    outside = s['role'] == 'exit'
+    local, peer = (EXIT_IP, ENTRY_IP) if outside else (ENTRY_IP, EXIT_IP)
+    remote = '' if outside else f'-s {s["exit_ip"]} --sport {s["exit_port"]} '
+    add('WGB_IN', f'-i {s["wan"]} -p udp {remote}--dport {s["port"]} -j ACCEPT')
+    add('WGB_IN', f'-i {LINK} -s {peer} -d {local} -p icmp -j ACCEPT')
+    if outside:
+        for proto in protocols(s):
+            add('WGB_IN', f'-i {LINK} -s {peer} -d {local} -p {proto} --dport {s["target_port"]} -j ACCEPT')
     else:
-        # OUTPUT's hook interface can still be the initial route's device after
-        # mangle reroutes a marked reply. Exempt replies before testing -o.
-        add('WGB_OUTPUT', f'-m mark --mark {BYPASS} -j RETURN')
-        add('WGB_OUTPUT', f'-o {BLOCK} -j REJECT')
-        add('WGB_FWD', f'-o {BLOCK} -j REJECT')
-        # Remember connections initiated toward this host (SSH, panel, proxy clients).
-        # A connmark is NOT a packet mark: outgoing proxy connections still use VPN.
-        add('WGB_PRE', f'-i {s["wan"]} -m conntrack --ctdir ORIGINAL -j CONNMARK --set-xmark {BYPASS}', 'mangle')
-        add('WGB_OUT', '-j CONNMARK --restore-mark --nfmask 0x40000000 --ctmask 0x40000000', 'mangle')
-        # Replies to routed/SNATed connections need their original return route too.
-        add('WGB_PRE', f'-i {LINK} -j CONNMARK --restore-mark --nfmask 0x40000000 --ctmask 0x40000000', 'mangle')
-        if version == 4 or s['ipv6']:
-            add('WGB_FWD', f'-o {LINK} -j ACCEPT')
-            add('WGB_FWD', f'-i {LINK} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT')
-            add('WGB_NAT', f'-o {LINK} -j MASQUERADE', 'nat')
-        else:
-            add('WGB_OUTPUT', f'-o {LINK} ! -d {V6_LINK} -j REJECT')
-        add('WGB_FWD', f'-i {LINK} -j REJECT')
-        add('WGB_FWD', f'-o {LINK} -j REJECT')
+        add('WGB_IN', f'-i {LINK} -s {peer} -d {local} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT')
+        add('WGB_FWD', f'-i {LINK} -o {s["wan"]} -s {peer} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT')
+        for proto in protocols(s):
+            destination = f'-p {proto} -d {peer} --dport {s["target_port"]}'
+            tracked = f'-m conntrack --ctstate DNAT --ctorigdstport {s["listen_port"]}'
+            add('WGB_DNAT', f'-i {s["wan"]} -p {proto} --dport {s["listen_port"]} -m addrtype --dst-type LOCAL -j DNAT --to-destination {peer}:{s["target_port"]}', 'nat')
+            add('WGB_FWD', f'-i {s["wan"]} -o {LINK} {destination} {tracked} -j ACCEPT')
+            # When wg-quick is stopped, the private connected route disappears.
+            # Reject this mapping before it can follow the host's WAN default.
+            add('WGB_FWD', f'-i {s["wan"]} {destination} {tracked} -j REJECT')
+            add('WGB_NAT', f'-o {LINK} {destination} {tracked} -j SNAT --to-source {local}', 'nat')
+    add('WGB_IN', f'-i {LINK} -j REJECT')
+    add('WGB_FWD', f'-i {LINK} -j REJECT')
+    add('WGB_FWD', f'-o {LINK} -j REJECT')
     add('WGB_MSS', f'-o {LINK} -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu', 'mangle')
     return rules
 
 
-CHAINS = [('filter', 'INPUT', 'WGB_IN'), ('filter', 'FORWARD', 'WGB_FWD'),
-          ('filter', 'OUTPUT', 'WGB_OUTPUT'), ('nat', 'POSTROUTING', 'WGB_NAT'),
-          ('mangle', 'FORWARD', 'WGB_MSS'), ('mangle', 'PREROUTING', 'WGB_PRE'),
-          ('mangle', 'OUTPUT', 'WGB_OUT')]
-
-
-def policy_rules(s, version):
-    rules = [['priority', '12128', 'fwmark', BYPASS, 'table', 'main']]
-    if s.get('ssh_peer') and ipaddress.ip_address(s['ssh_peer']).version == version:
-        rules.insert(0, ['priority', '12127', 'to', s['ssh_peer']+('/32' if version == 4 else '/128'), 'table', 'main'])
-    if version == 4:
-        rules.append(['priority', '12129', 'to', s['exit_ip']+'/32', 'table', 'main'])
-    rules.append(['priority', '12130', 'table', 'main', 'suppress_prefixlength', '0'])
-    rules.append(['priority', PRIORITY, 'not', 'fwmark', TABLE, 'table', TABLE])
-    return rules
-
-
 def network(s, up):
-    # An always-present sink route lets OUTPUT restore incoming connection marks
-    # before routing their replies to WAN. An unreachable route would fail before
-    # OUTPUT, breaking incoming SSH whenever the WG interface disappeared.
-    if s['role'] == 'entry' and up:
-        if run(['ip', 'link', 'show', BLOCK], check=False).returncode:
-            run(['ip', 'link', 'add', BLOCK, 'type', 'dummy'])
-        run(['ip', 'link', 'set', BLOCK, 'up'])
-        for version in [4, 6]:
-            run(['ip', f'-{version}', 'route', 'replace', 'default', 'dev', BLOCK, 'table', TABLE, 'metric', '32767'])
-    for version in [4, 6]:
-        tool = 'iptables' if version == 4 else 'ip6tables'
-        if up:
-            # Populate only our chains, then attach hooks. No global firewall flush.
-            for table, parent, chain in CHAINS:
-                run([tool, '-w', '-t', table, '-N', chain], check=False)
-            for table, chain, args in firewall_rules(s, version):
-                if run([tool, '-w', '-t', table, '-C', chain]+args, check=False).returncode:
-                    run([tool, '-w', '-t', table, '-A', chain]+args)
-            for table, parent, chain in CHAINS:
-                if run([tool, '-w', '-t', table, '-C', parent, '-j', chain], check=False).returncode:
-                    run([tool, '-w', '-t', table, '-I', parent, '1', '-j', chain])
-        if s['role'] == 'entry':
-            if up:
-                # Preserve already-established inbound sessions before changing routing.
-                for dev in json.loads(run(['ip', '-j', f'-{version}', 'addr', 'show', 'dev', s['wan']])):
-                    for addr in dev.get('addr_info', []):
-                        run(['conntrack', '-U', '-f', 'ipv4' if version == 4 else 'ipv6', '--orig-dst', addr['local'], '--mark', BYPASS], check=False)
-            for rule in policy_rules(s, version):
-                if not up:
-                    run(['ip', f'-{version}', 'rule', 'del']+rule, check=False)
-                elif not json.loads(run(['ip', '-j', f'-{version}', 'rule', 'show', 'priority', rule[1]])):
-                    run(['ip', f'-{version}', 'rule', 'add']+rule)
-            if not up:
-                run(['ip', f'-{version}', 'route', 'del', 'default', 'dev', BLOCK, 'table', TABLE, 'metric', '32767'], check=False)
-        if not up:
-            for table, parent, chain in reversed(CHAINS):
-                while run([tool, '-w', '-t', table, '-C', parent, '-j', chain], check=False).returncode == 0:
-                    run([tool, '-w', '-t', table, '-D', parent, '-j', chain])
-                run([tool, '-w', '-t', table, '-F', chain], check=False)
-                run([tool, '-w', '-t', table, '-X', chain], check=False)
-    if not up and s['role'] == 'entry':
-        run(['ip', 'link', 'del', BLOCK], check=False)
+    if s.get('mode') != MODE:
+        raise BridgeError('Full-routing state is not supported. Uninstall the old version before installing v0.3.')
     if up:
-        # Preserve providers' SLAAC routes. Loose rp_filter accepts the VPN return path.
-        run(['sysctl', '-w', f'net.ipv6.conf.{s["wan"]}.accept_ra=2'])
-        run(['sysctl', '-w', 'net.ipv4.ip_forward=1', 'net.ipv6.conf.all.forwarding=1', 'net.ipv4.conf.all.rp_filter=2'])
+        for table, _, chain in CHAINS:
+            run(['iptables', '-w', '-t', table, '-N', chain], check=False)
+        for table, chain, args in firewall_rules(s):
+            if run(['iptables', '-w', '-t', table, '-C', chain]+args, check=False).returncode:
+                run(['iptables', '-w', '-t', table, '-A', chain]+args)
+        # Attach DNAT last, once the narrow forwarding and fallback guards exist.
+        for table, parent, chain in sorted(CHAINS, key=lambda x: x[2] == 'WGB_DNAT'):
+            if run(['iptables', '-w', '-t', table, '-C', parent, '-j', chain], check=False).returncode:
+                run(['iptables', '-w', '-t', table, '-I', parent, '1', '-j', chain])
+        if s['role'] == 'entry':
+            run(['sysctl', '-w', 'net.ipv4.ip_forward=1'])
+    else:
+        for table, parent, chain in sorted(CHAINS, key=lambda x: x[2] != 'WGB_DNAT'):
+            while run(['iptables', '-w', '-t', table, '-C', parent, '-j', chain], check=False).returncode == 0:
+                run(['iptables', '-w', '-t', table, '-D', parent, '-j', chain])
+            run(['iptables', '-w', '-t', table, '-F', chain], check=False)
+            run(['iptables', '-w', '-t', table, '-X', chain], check=False)
 
 
 def services(s):
@@ -401,12 +378,11 @@ def preflight():
         raise BridgeError('A systemd VPS/VM is required; ordinary Docker/OpenVZ containers are not supported.')
     if run(['systemctl', 'is-active', 'firewalld'], check=False).returncode == 0:
         raise BridgeError('firewalld is active. This release supports iptables/UFW hosts, not firewalld.')
-    for cmd in ['wg', 'wg-quick', 'ip', 'iptables', 'ip6tables', 'sysctl', 'conntrack', 'curl']:
+    for cmd in ['wg', 'wg-quick', 'ip', 'iptables', 'sysctl', 'curl']:
         if shutil.which(cmd) is None:
             raise BridgeError('Missing dependency: '+cmd+'. Re-run install.sh.')
     run(['modprobe', 'wireguard'])
-    for tool in ['iptables', 'ip6tables']:
-        run([tool, '-w', '-t', 'nat', '-S'])
+    run(['iptables', '-w', '-t', 'nat', '-S'])
 
 
 def install():
@@ -417,9 +393,9 @@ def install():
     if STATE.exists() and any(STATE.iterdir()):
         raise BridgeError('/etc/wg-bridge contains an incomplete install. Inspect it before retrying.')
     heading('Installation', 'Set up Client (Outside) first, then Server (Iran).')
-    menu_option('1', 'Server (Iran / entry)', 'Hosts your panel; sends outbound traffic through the tunnel.')
+    menu_option('1', 'Server (Iran / entry)', 'Forwards one chosen IPv4 port to the outside service.')
     print()
-    menu_option('2', 'Client (Outside / exit)', 'Provides Internet access; generates the pairing code.')
+    menu_option('2', 'Client (Outside / exit)', 'Runs the destination service; generates the pairing code.')
     print()
     menu_option('0', 'Exit')
     print()
@@ -428,13 +404,7 @@ def install():
         return
     if role not in ['1', '2']:
         raise BridgeError('Choose 1 or 2.')
-    s = {'version': VERSION, 'role': 'entry' if role == '1' else 'exit'}
-    ssh_peer = os.environ.get('WGB_SSH_PEER') or os.environ.get('SSH_CONNECTION', '').split(' ')[0]
-    if ssh_peer:
-        try:
-            s['ssh_peer'] = str(ipaddress.ip_address(ssh_peer))
-        except ValueError:
-            raise BridgeError('Cannot validate the current SSH address; reconnect using a standard SSH session.') from None
+    s = {'version': VERSION, 'mode': MODE, 'role': 'entry' if role == '1' else 'exit'}
     if s['role'] == 'entry':
         print('Initialize Client (Outside) first to obtain its pairing code.')
         # Hidden input prevents the pairing secret being copied into a screen recording.
@@ -442,21 +412,27 @@ def install():
         pairing = pairing_decode(getpass.getpass('Client (Outside) pairing code (hidden): '))
         s.update({'exit_ip': pairing['server_ip'], 'exit_port': pairing['server_port'],
                   'link_private': pairing['client_private'], 'peer_public': pairing['server_public'],
-                  'psk': pairing['psk'], 'ipv6': pairing['ipv6']})
+                  'psk': pairing['psk'], 'target_port': pairing['target_port'], 'protocol': pairing['protocol']})
     s['public_ip'] = valid_ip(prompt('This server PUBLIC IPv4', detect_ip()))
     label = 'UDP port (open it in the outside provider firewall)' if s['role'] == 'exit' else 'Local WireGuard UDP port'
     s['port'] = valid_port(prompt(label, '51830' if s['role'] == 'exit' else '51831'))
     s['wan'] = default_device()
-    conflicts(s['port'])
+    if s['role'] == 'exit':
+        s['target_port'] = valid_port(prompt('Service port on Outside', DEFAULT_SERVICE_PORT))
+        s['protocol'] = valid_protocol(prompt('Forward protocol: tcp / udp / both', 'both').lower())
+        if 'udp' in protocols(s) and s['target_port'] == s['port']:
+            raise BridgeError('The service UDP port must differ from the WireGuard transport port.')
+    else:
+        s['listen_port'] = valid_port(prompt('Public port on Iran to forward', str(s['target_port'])))
+    conflicts(s)
     if s['role'] == 'exit':
         s['link_private'], server_public = keypair()
         client_private, s['peer_public'] = keypair()
         s['psk'] = run(['wg', 'genpsk'])
-        s['ipv6'] = bool(json.loads(run(['ip', '-j', '-6', 'route', 'show', 'default'])))
-        s['pairing'] = pairing_encode({'version': 1, 'server_ip': s['public_ip'], 'server_port': s['port'],
+        s['pairing'] = pairing_encode({'version': 2, 'server_ip': s['public_ip'], 'server_port': s['port'],
                                       'server_public': server_public, 'client_private': client_private,
-                                      'psk': s['psk'], 'ipv6': s['ipv6']})
-    keys = ['net.ipv4.ip_forward', 'net.ipv4.conf.all.rp_filter', 'net.ipv6.conf.all.forwarding', f'net.ipv6.conf.{s["wan"]}.accept_ra']
+                                      'psk': s['psk'], 'target_port': s['target_port'], 'protocol': s['protocol']})
+    keys = ['net.ipv4.ip_forward'] if s['role'] == 'entry' else []
     s['sysctl_before'] = {k: run(['sysctl', '-n', k]) for k in keys}
     STATE.mkdir(mode=0o700, exist_ok=True)
     os.chmod(STATE, 0o700)
@@ -469,8 +445,7 @@ def install():
         uninstall(s, confirm=False, purge=False)
         raise
     print('\nInstalled. Run: sudo wg-bridge')
-    if not s['ipv6']:
-        print('Outside IPv6 is unavailable: outbound IPv6 Internet traffic will be blocked, not bypass the tunnel.')
+    print('Host Internet routes are unchanged. Only the selected IPv4 port is forwarded.')
     if s['role'] == 'exit':
         print('\nPairing code: SECRET. Hide this part when recording a video. Use on ONE Iran server only.\n')
         print(s['pairing'])
@@ -480,26 +455,33 @@ def install():
             print('Installed but NOT connected. Fix the reported issue, then run: sudo wg-bridge doctor')
 
 
+def mapping(s):
+    if s['role'] == 'entry':
+        return f'{s["public_ip"]}:{s["listen_port"]} -> {EXIT_IP}:{s["target_port"]} ({s["protocol"]})'
+    return f'Outside service: {EXIT_IP}:{s["target_port"]} ({s["protocol"]})'
+
+
 def status(s):
     os.environ['WG_HIDE_KEYS'] = 'always'
     print('WG Bridge '+VERSION+' | '+role_label(s))
-    for iface in [LINK]:
-        result = run(['wg', 'show', iface], check=False)
-        print(result.stdout if result.returncode == 0 else iface+': DOWN')
-    print('IPv6: '+('enabled' if s['ipv6'] else 'blocked for outgoing Internet traffic'))
+    print(mapping(s))
+    result = run(['wg', 'show', LINK], check=False)
+    print(result.stdout if result.returncode == 0 else LINK+': DOWN')
+    print('Host Internet routes and IPv6 are unchanged.')
 
 
 def doctor(s):
-    print('\nChecking services, handshake and outside connectivity...')
+    print('\nChecking services and WireGuard connectivity...')
     for unit in ['wg-bridge-network', 'wg-quick@'+LINK]:
         if run(['systemctl', 'is-active', unit], check=False).returncode:
             print(unit+': NOT ACTIVE. Start the tunnel from the menu; inspect journalctl -u '+unit)
             return False
+    print(mapping(s))
     if s['role'] == 'exit':
-        status(s)
-        print('If Iran cannot connect: check UDP '+str(s['port'])+' in the provider firewall.')
+        print(f'The destination application must listen on 0.0.0.0:{s["target_port"]} or {EXIT_IP}:{s["target_port"]}.')
+        print('Allow WireGuard UDP '+str(s['port'])+' in the outside provider firewall.')
         return True
-    run(['ping', '-c', '1', '-W', '2', '-I', '10.204.0.2', '10.204.0.1'], check=False)
+    run(['ping', '-c', '1', '-W', '2', '-I', ENTRY_IP, EXIT_IP], check=False)
     for _ in range(10):
         result = run(['wg', 'show', LINK, 'latest-handshakes'], check=False)
         if result.returncode == 0 and any(int(line.split()[1]) > time.time()-180 for line in result.stdout.splitlines() if len(line.split()) == 2):
@@ -507,24 +489,20 @@ def doctor(s):
         time.sleep(1)
     else:
         print('NO HANDSHAKE: verify the pairing code, outside IP, UDP '+str(s['exit_port'])+', and network filtering.')
+        print('Only the selected forwarded port is unavailable; host Internet routes are unchanged.')
         return False
-    good = True
-    families = [(4, 'https://api.ipify.org')]
-    if s['ipv6']:
-        families.append((6, 'https://api64.ipify.org'))
-    for version, url in families:
-        p = run(['curl', f'-{version}', '-fsS', '--connect-timeout', '5', '--max-time', '10', url], check=False)
+    print('WireGuard handshake: OK')
+    if 'tcp' in protocols(s):
         try:
-            if p.returncode: raise ValueError()
-            observed = ipaddress.ip_address(p.stdout.strip())
-            if observed.version != version or not observed.is_global: raise ValueError()
-            if version == 4 and str(observed) == s['public_ip']: raise ValueError()
-            print(f'IPv{version} outside address: {observed}')
-        except ValueError:
-            print(f'IPv{version} egress check FAILED. Check forwarding, NAT and the outside Internet route.')
-            good = False
-    print('Also test your existing panel users and a NEW SSH session before closing this terminal.')
-    return good
+            with socket.create_connection((EXIT_IP, s['target_port']), timeout=4): pass
+        except OSError:
+            print('TCP destination is not accepting connections. Start the application on Outside or check its bind address/firewall.')
+            return False
+        print('TCP destination: reachable')
+    if 'udp' in protocols(s):
+        print('Test UDP with the destination application; a handshake alone does not verify the UDP service.')
+    print('Test the public forwarded port from a third host. Local Iran connections are not redirected.')
+    return True
 
 
 def uninstall(s, confirm=True, purge=True):
@@ -540,7 +518,7 @@ def uninstall(s, confirm=True, purge=True):
     network(s, False)
     # Restore only a knob whose current value is still the value we set.
     for k, value in s.get('sysctl_before', {}).items():
-        expected = '2' if k.endswith(('accept_ra','rp_filter')) else '1'
+        expected = '1'
         if run(['sysctl', '-n', k]) == expected:
             run(['sysctl', '-w', k+'='+value])
     for name in names:
@@ -571,24 +549,48 @@ def remove_program():
         APP.parent.rmdir()
 
 
+def change_port(s, value=None):
+    if s['role'] != 'entry':
+        raise BridgeError('Change the public forwarding port on Server (Iran).')
+    updated = dict(s, listen_port=valid_port(value or prompt('New public port on Iran', str(s['listen_port']))))
+    if updated['listen_port'] == s['listen_port']:
+        print('Port unchanged.')
+        return
+    check_listener(updated)
+    # Network rules persist even when WireGuard is stopped; keep that guard.
+    try:
+        network(s, False)
+        persist(updated)
+        network(updated, True)
+    except (Exception, KeyboardInterrupt):
+        network(updated, False)
+        persist(s)
+        network(s, True)
+        raise
+    print('Updated: '+mapping(updated))
+
+
 def menu():
     s = load()
-    heading('Tunnel management', role_label(s))
+    heading('Tunnel management', role_label(s)+' | '+mapping(s))
     menu_option('1', 'Status')
     menu_option('2', 'Diagnose connectivity')
     print()
     menu_option('3', 'Restart tunnel')
     menu_option('4', 'Show pairing code', 'Available on Client (Outside); keep this code private.')
-    menu_option('5', 'Stop tunnel', 'Outbound Internet is blocked; inbound SSH remains available.')
+    menu_option('5', 'Stop tunnel', 'Only the forwarded port stops; other services keep their routes.')
     menu_option('6', 'Start tunnel')
     print()
     menu_option('7', 'Uninstall completely', 'Remove WG Bridge, its tunnel configuration and keys.', '31')
+    if s['role'] == 'entry':
+        menu_option('8', 'Change public forwarding port', 'The outside service port and tunnel keys stay the same.')
     menu_option('0', 'Exit')
     print()
-    choice = prompt('  Select [0-7]')
+    choice = prompt('  Select')
     if choice == '1': status(s)
     elif choice == '2': doctor(s)
     elif choice in ['3', '6']:
+        run(['systemctl', 'start', 'wg-bridge-network.service'])
         network(s, True)
         run(['systemctl', 'restart' if choice == '3' else 'start', 'wg-quick@'+LINK])
         doctor(s)
@@ -599,12 +601,13 @@ def menu():
         run(['systemctl', 'stop', 'wg-quick@'+LINK])
         print('Tunnel stopped. Run wg-bridge and choose Start to resume.')
     elif choice == '7': uninstall(s)
+    elif choice == '8': change_port(s)
     elif choice != '0': raise BridgeError('Unknown menu option.')
 
 
 def main():
     parser = argparse.ArgumentParser(description='WG Bridge: Server (Iran / entry) and Client (Outside / exit)')
-    parser.add_argument('command', nargs='?', default='menu', choices=['menu','install','status','doctor','uninstall','_network','version'])
+    parser.add_argument('command', nargs='?', default='menu', choices=['menu','install','status','doctor','uninstall','port','_network','version'])
     parser.add_argument('argument', nargs='?')
     args = parser.parse_args()
     if args.command == 'version':
@@ -631,6 +634,7 @@ def main():
             elif args.command == 'doctor':
                 if not doctor(s): sys.exit(2)
             elif args.command == 'uninstall': uninstall(s)
+            elif args.command == 'port': change_port(s, args.argument)
 
 
 if __name__ == '__main__':

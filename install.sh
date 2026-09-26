@@ -2,8 +2,8 @@
 # WG Bridge bootstrap and lifecycle entry point.
 set -Eeuo pipefail
 REPO="itsalirezaw/wg-bridge"
-REF="v0.2.2"
-CORE_SHA256="c40f647e598084d76132b44f21cbfe964ef2f4c5d4c8d63424f7c19100539f2c"
+REF="v0.3.0"
+CORE_SHA256="4dab26439519277e2b1f3e7c13d76df865b6fef2fca1cda7cb4c126831517b33"
 APP_DIR="/usr/local/lib/wg-bridge"
 MODE="${1:-install}"
 
@@ -50,6 +50,14 @@ if [[ "$MODE" != "--check" ]]; then
     *) echo "Supported: Ubuntu 22.04/24.04/26.04 LTS (including point releases) or Debian 12/13 with systemd." >&2; exit 1 ;;
   esac
   [[ -d /run/systemd/system ]] || { echo "A systemd VPS/VM is required." >&2; exit 1; }
+  if [[ -f /etc/wg-bridge/state.json ]] && ! python3 -c 'import json; s=json.load(open("/etc/wg-bridge/state.json")); raise SystemExit(0 if s.get("mode")=="port-forward-v1" else 1)'; then
+    echo 'This installation uses the old full-routing mode. It cannot be upgraded in place.' >&2
+    echo 'On Iran, restore direct Internet first:' >&2
+    echo '  systemctl stop wg-quick@wgb-exit.service wg-bridge-network.service' >&2
+    echo 'Then run wg-bridge uninstall on each host and confirm REMOVE.' >&2
+    echo 'Install v0.3 on Outside first, then pair Iran with the new WGB2 code.' >&2
+    exit 1
+  fi
   if [[ "$MODE" == "install" && -f /etc/wg-bridge/state.json && -f "$APP_DIR/wg_bridge.py" ]]; then
     echo "Opening installed manager. Use --upgrade to install $REF without replacing keys."
     python3 "$APP_DIR/wg_bridge.py" </dev/tty

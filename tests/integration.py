@@ -156,98 +156,120 @@ for line in sys.stdin:
         assert reply == 'alive'
     existing_session()
 
+
+    for target in [9443, 9444]:
+        background('out', HTTP.replace('FAMILY', 'socket.AF_INET').replace('ADDRESS', repr('0.0.0.0')).replace('PORT', str(target)))
+    background('out', """
+import socket
+s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.bind(('0.0.0.0',9443))
+while True:
+    _,addr=s.recvfrom(1024);s.sendto(addr[0].encode(),addr)
+""")
+    # An unrelated LAN routing service must keep working independently.
+    ns('ir', 'sysctl', '-w', 'net.ipv4.ip_forward=1')
+    ns('ir', 'iptables', '-A', 'FORWARD', '-i', 'lan0', '-o', 'wan0', '-j', 'ACCEPT')
+    ns('ir', 'iptables', '-A', 'FORWARD', '-i', 'wan0', '-o', 'lan0', '-m', 'conntrack', '--ctstate', 'ESTABLISHED,RELATED', '-j', 'ACCEPT')
+    ns('ir', 'iptables', '-t', 'nat', '-A', 'POSTROUTING', '-s', '10.222.0.0/24', '-o', 'wan0', '-j', 'MASQUERADE')
+    routes_before = {name: {family: (ns(name, 'ip', family, '-j', 'route', 'show', 'default').stdout,
+                                    ns(name, 'ip', family, '-j', 'rule').stdout)
+                            for family in ['-4','-6']} for name in ['ir','out']}
+    def stable_rules(value):
+        return [re.sub(r'\[\d+:\d+\]', '[0:0]', line) for line in value.splitlines() if not line.startswith('#')]
+    v6_rules_before = {name: stable_rules(ns(name, 'ip6tables-save').stdout) for name in ['ir','out']}
+    def unchanged_routing():
+        for name in ['ir','out']:
+            for family in ['-4','-6']:
+                assert (ns(name, 'ip', family, '-j', 'route', 'show', 'default').stdout,
+                        ns(name, 'ip', family, '-j', 'rule').stdout) == routes_before[name][family]
+            assert stable_rules(ns(name, 'ip6tables-save').stdout) == v6_rules_before[name]
+    def direct_services():
+        assert fetch('ir', 'http://203.0.113.1:8000') == '192.0.2.2'
+        assert fetch('ir', 'http://[fdff::1]:8002') == 'fd10:1::2'
+        assert fetch('out', 'http://203.0.113.1:8000') == '198.51.100.2'
+        assert fetch('lan', 'http://203.0.113.1:8000') == '192.0.2.2'
+        assert fetch('wan', 'http://192.0.2.2:8080', '203.0.113.2') == '203.0.113.2'
+        assert fetch('wan', 'http://[fd10:1::2]:8082', 'fdff::2') == 'fdff::2'
+        existing_session()
+        unchanged_routing()
+    def udp(port, ok=True):
+        p = ns('wan', 'python3', '-c',
+               "import socket;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(2);"
+               "s.sendto(b'probe',('192.0.2.2',"+str(port)+"));print(s.recv(100).decode())", check=False)
+        if ok: assert p.returncode == 0 and p.stdout.strip() == w.ENTRY_IP
+        else: assert p.returncode != 0
+
     server_private, server_public = w.keypair()
     client_private, client_public = w.keypair()
     psk = w.run(['wg', 'genpsk'])
     states = {
-        'out': dict(role='exit', wan='wan0', ipv6=True, port=51830, link_private=server_private, peer_public=client_public, psk=psk),
-        'ir': dict(role='entry', wan='wan0', ipv6=True, port=51831, link_private=client_private, peer_public=server_public, psk=psk, exit_ip='198.51.100.2', exit_port=51830)
+        'out': dict(mode=w.MODE, role='exit', wan='wan0', port=51830, target_port=9443, protocol='both',
+                    public_ip='198.51.100.2', link_private=server_private, peer_public=client_public, psk=psk),
+        'ir': dict(mode=w.MODE, role='entry', wan='wan0', port=51831, listen_port=8443, target_port=9443, protocol='both',
+                   public_ip='192.0.2.2', link_private=client_private, peer_public=server_public, psk=psk,
+                   exit_ip='198.51.100.2', exit_port=51830)
     }
     for name, state in states.items():
         w.save(folder/name/'state.json', json.dumps(state))
         w.save(folder/name/'wgb-exit.conf', w.link_config(state))
         apply(name, folder, True)
         ns(name, 'wg-quick', 'up', folder/name/'wgb-exit.conf')
-    existing_session()
-    assert fetch('ir', 'http://203.0.113.1:8000') == '198.51.100.2'
-    assert fetch('ir', 'http://[fdff::1]:8002') == 'fd10:2::2'
-    assert fetch('lan', 'http://203.0.113.1:8000') == '198.51.100.2'
-    assert fetch('lan', 'http://[fdff::1]:8002') == 'fd10:2::2'
-    assert fetch('wan', 'http://192.0.2.2:8080', '203.0.113.2') == '203.0.113.2'
-    assert fetch('wan', 'http://[fd10:1::2]:8082', 'fdff::2') == 'fdff::2'
-    print('PASS: real WG handshake, IPv4/IPv6 egress and forwarded LAN; new/existing inbound TCP preserved', flush=True)
-    # UDP travels through the same tunnel, independent of the number of panel users.
-    background('wan', '''
-import socket
-s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.bind(('203.0.113.1',8001))
-while True:
-    _,addr=s.recvfrom(1024);s.sendto(addr[0].encode(),addr)
-''')
-    time.sleep(0.2)
-    udp = ns('ir', 'python3', '-c', "import socket;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(3);s.sendto(b'x',('203.0.113.1',8001));print(s.recv(100).decode())", check=False)
-    if udp.returncode:
-        for name in ['ir', 'out', 'wan']:
-            print(name, ns(name, 'ss', '-unlp').stdout, flush=True)
-            print(ns(name, 'conntrack', '-L', '-p', 'udp', check=False).stdout, flush=True)
-            print(ns(name, 'iptables', '-t', 'filter', '-L', 'FORWARD', '-nv').stdout, flush=True)
-            if name != 'wan':
-                print(ns(name, 'iptables', '-t', 'nat', '-L', 'WGB_NAT', '-nv').stdout, flush=True)
-        raise AssertionError('UDP failed: '+udp.stderr)
-    assert udp.stdout.strip() == '198.51.100.2'
+    time.sleep(0.5)
+    assert fetch('wan', 'http://192.0.2.2:8443') == w.ENTRY_IP
+    udp(8443)
+    # No local OUTPUT redirection, and no access to other outside service ports.
+    fetch('ir', 'http://192.0.2.2:8443', ok=False)
+    fetch('ir', 'http://10.204.0.1:9444', ok=False)
+    direct_services()
+    print('PASS: one selected TCP/UDP port reaches Outside; direct IPv4/IPv6, LAN and inbound services are unchanged', flush=True)
     with concurrent.futures.ThreadPoolExecutor(max_workers=40) as pool:
-        results = list(pool.map(lambda _: fetch('ir', 'http://203.0.113.1:8000'), range(300)))
-    assert all(ip == '198.51.100.2' for ip in results)
-    print('PASS: UDP and 300 HTTP requests (40 workers); this is NOT a capacity benchmark', flush=True)
-    before = ns('ir', 'ip', '-j', 'rule').stdout
-    rules_before = ns('ir', 'iptables-save').stdout
+        assert all(x == w.ENTRY_IP for x in pool.map(lambda _: fetch('wan', 'http://192.0.2.2:8443'), range(300)))
+    before = ns('ir', 'iptables-save').stdout
     apply('ir', folder, True)
-    assert ns('ir', 'ip', '-j', 'rule').stdout == before
-    def stable_rules(value):
-        return [re.sub(r'\[\d+:\d+\]', '[0:0]', line) for line in value.splitlines() if not line.startswith('#')]
-    assert stable_rules(ns('ir', 'iptables-save').stdout) == stable_rules(rules_before)
-    existing_session()
-    for name in ['ir', 'out']:
-        ns(name, 'wg-quick', 'down', folder/name/'wgb-exit.conf')
-    fetch('ir', 'http://203.0.113.1:8000', ok=False)
-    fetch('ir', 'http://[fdff::1]:8002', ok=False)
-    fetch('lan', 'http://203.0.113.1:8000', ok=False)
-    try:
-        assert fetch('wan', 'http://192.0.2.2:8080', '203.0.113.2') == '203.0.113.2'
-    except AssertionError:
-        print(ns('ir', 'iptables-save', '-c').stdout, flush=True)
-        print(ns('ir', 'ip', 'route', 'show', 'table', 'all').stdout, flush=True)
-        print(ns('ir', 'conntrack', '-L', '-p', 'tcp', '--dport', '8080', check=False).stdout, flush=True)
-        raise
-    existing_session()
-    assert fetch('wan', 'http://[fd10:1::2]:8082', 'fdff::2') == 'fdff::2'
-    print('PASS: no outgoing fallback with tunnel stopped; inbound management remains available', flush=True)
-    for name in ['out', 'ir']:
-        ns(name, 'wg-quick', 'up', folder/name/'wgb-exit.conf')
-    assert fetch('ir', 'http://203.0.113.1:8000') == '198.51.100.2'
+    assert stable_rules(before) == stable_rules(ns('ir', 'iptables-save').stdout)
+    print('PASS: idempotent rules and 300 forwarded HTTP requests (40 workers)', flush=True)
+    # A peer failure must affect only the forwarded service.
+    ns('out', 'wg-quick', 'down', folder/'out'/'wgb-exit.conf')
+    fetch('wan', 'http://192.0.2.2:8443', ok=False)
+    direct_services()
+    ns('out', 'wg-quick', 'up', folder/'out'/'wgb-exit.conf')
+    # Removing the Iran WG interface must not leak DNAT packets to WAN.
+    ns('ir', 'wg-quick', 'down', folder/'ir'/'wgb-exit.conf')
+    ns('wan', 'iptables', '-N', 'LEAK_CHECK')
+    ns('wan', 'iptables', '-A', 'LEAK_CHECK', '-j', 'DROP')
+    ns('wan', 'iptables', '-I', 'FORWARD', '1', '-d', w.EXIT_IP, '-j', 'LEAK_CHECK')
+    fetch('wan', 'http://192.0.2.2:8443', ok=False)
+    udp(8443, ok=False)
+    leak = ns('wan', 'iptables', '-L', 'LEAK_CHECK', '-nvx').stdout
+    assert any(re.match(r'\s*0\s+0\s+DROP', line) for line in leak.splitlines()), leak
+    direct_services()
+    ns('ir', 'wg-quick', 'up', folder/'ir'/'wgb-exit.conf')
+    assert fetch('wan', 'http://192.0.2.2:8443') == w.ENTRY_IP
+    print('PASS: unreachable peer, stopped interface and restart preserve other services; forwarded packets never escape to WAN', flush=True)
+    # Custom port and protocol selection, without changing any default route.
+    apply('ir', folder, False)
+    states['ir'].update(listen_port=10443, protocol='tcp')
+    w.save(folder/'ir'/'state.json', json.dumps(states['ir']))
+    apply('ir', folder, True)
+    assert fetch('wan', 'http://192.0.2.2:10443') == w.ENTRY_IP
+    fetch('wan', 'http://192.0.2.2:8443', ok=False)
+    udp(10443, ok=False)
+    apply('ir', folder, False)
+    states['ir']['protocol'] = 'udp'
+    w.save(folder/'ir'/'state.json', json.dumps(states['ir']))
+    apply('ir', folder, True)
+    udp(10443)
+    fetch('wan', 'http://192.0.2.2:10443', ok=False)
+    direct_services()
+    print('PASS: custom ports, TCP-only and UDP-only forwarding', flush=True)
     for name in ['ir', 'out']:
         ns(name, 'wg-quick', 'down', folder/name/'wgb-exit.conf')
         apply(name, folder, False)
-        states[name]['ipv6'] = False
-        w.save(folder/name/'state.json', json.dumps(states[name]))
-    for name in ['out', 'ir']:
-        apply(name, folder, True)
-        ns(name, 'wg-quick', 'up', folder/name/'wgb-exit.conf')
-    assert fetch('ir', 'http://203.0.113.1:8000') == '198.51.100.2'
-    fetch('ir', 'http://[fdff::1]:8002', ok=False)
-    fetch('lan', 'http://[fdff::1]:8002', ok=False)
-    assert fetch('wan', 'http://[fd10:1::2]:8082', 'fdff::2') == 'fdff::2'
-    print('PASS: IPv4-only exit blocks IPv6 for host and forwarded traffic', flush=True)
-    for name in ['ir', 'out']:
-        ns(name, 'wg-quick', 'down', folder/name/'wgb-exit.conf')
-        apply(name, folder, False)
-        for tool in ['iptables', 'ip6tables']:
-            ns(name, tool, '-C', 'INPUT', '-j', 'UNRELATED')
-            assert '-P FORWARD DROP' in ns(name, tool, '-S').stdout
-            assert 'WGB_' not in ns(name, tool+'-save').stdout
-        assert '12131' not in ns(name, 'ip', 'rule').stdout
-    assert fetch('ir', 'http://203.0.113.1:8000') == '192.0.2.2'
-    existing_session()
-    print('PASS: restart and removal; unrelated firewall preserved; original Internet route restored', flush=True)
+        ns(name, 'iptables', '-C', 'INPUT', '-j', 'UNRELATED')
+        assert '-P FORWARD DROP' in ns(name, 'iptables', '-S').stdout
+        assert 'WGB_' not in ns(name, 'iptables-save').stdout
+    direct_services()
+    print('PASS: complete rule cleanup preserves unrelated firewall and routing', flush=True)
+
 
 
 def cleanup():

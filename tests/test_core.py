@@ -13,20 +13,15 @@ import wg_bridge as w
 
 
 class CoreTests(unittest.TestCase):
-    def test_legacy_state_keeps_topology(self):
-        old = {'role': 'client', 'server_ip': '8.8.8.8', 'server_port': 51830}
-        entry = w.normalize_state(old)
-        self.assertEqual(entry, {'role': 'entry', 'exit_ip': '8.8.8.8', 'exit_port': 51830})
-        self.assertEqual(old['role'], 'client')
-        self.assertEqual(w.normalize_state({'role': 'server'})['role'], 'exit')
-        self.assertEqual(w.role_label(entry), 'Server (Iran / entry)')
-        self.assertEqual(w.role_label(w.normalize_state({'role': 'server'})), 'Client (Outside / exit)')
-        with self.assertRaises(w.BridgeError): w.normalize_state({'role': 'unknown'})
+    def test_legacy_state_is_rejected_before_network_changes(self):
+        for old in [{'role': 'client'}, {'role': 'entry'}, {'mode': 'future', 'role': 'entry'}]:
+            with self.assertRaises(w.BridgeError): w.normalize_state(old)
+        with self.assertRaises(w.BridgeError): w.pairing_decode('WGB1.old.code')
 
     def payload(self):
         key = base64.b64encode(bytes(range(32))).decode()
-        return dict(version=1, server_ip='8.8.8.8', server_port=51830,
-                    server_public=key, client_private=key, psk=key, ipv6=True)
+        return dict(version=2, server_ip='8.8.8.8', server_port=51830,
+                    server_public=key, client_private=key, psk=key, target_port=8443, protocol="both")
 
     def test_pairing_round_trip(self):
         p = self.payload()
@@ -34,11 +29,11 @@ class CoreTests(unittest.TestCase):
 
     def test_pairing_rejects_corruption_and_extra_fields(self):
         encoded = w.pairing_encode(self.payload())
-        for code in [encoded[:-3], encoded.replace('WGB1', 'WGB2'), 'x'*4097, 'WGB1.!@#.x']:
+        for code in [encoded[:-3], encoded.replace('WGB2', 'WGB3'), 'x'*4097, 'WGB1.!@#.x']:
             with self.subTest(code=code[:20]), self.assertRaises(w.BridgeError):
                 w.pairing_decode(code)
-        for field, value in [('command', 'rm -rf /'), ('ipv6', 'yes'), ('version', True),
-                             ('server_ip', '8.8.8.8\nPostUp = x'), ('server_port', 1.5),
+        for field, value in [('command', 'rm -rf /'), ('protocol', 'icmp'), ('version', True),
+                             ('server_ip', '8.8.8.8\nPostUp = x'), ('target_port', 1.5),
                              ('client_private', 'invalid'), ('server_port', True)]:
             p = self.payload(); p[field] = value
             with self.subTest(field=field), self.assertRaises(w.BridgeError):
@@ -65,30 +60,44 @@ class CoreTests(unittest.TestCase):
             with self.assertRaises(w.BridgeError) as caught: w.run(['wg', 'SECRET'], 'SECRET')
             self.assertNotIn('SECRET', str(caught.exception))
 
-    def test_no_device_profiles_and_no_wg_quick_default_rule_ownership(self):
-        s = dict(role='entry', link_private='PRIVATE', peer_public='PUBLIC', psk='PSK',
-                 port=51831, exit_ip='8.8.8.8', exit_port=51830)
-        config = w.link_config(s)
-        self.assertEqual(config.count('[Peer]'), 1)
-        self.assertIn('Table = 52031', config)
-        self.assertIn('ListenPort = 51831', config)
-        self.assertNotIn('SaveConfig', config)
-        self.assertNotIn('PostDown', config)
-        self.assertIn('Endpoint = 8.8.8.8:51830', config)
-        exit_state = dict(s, role='exit')
-        exit_config = w.link_config(exit_state)
-        self.assertNotIn('Endpoint =', exit_config)
-        self.assertNotIn('Table =', exit_config)
-        self.assertIn('AllowedIPs = 10.204.0.2/32, fd42:204::2/128', exit_config)
+    def test_private_peer_routes_only(self):
+        for role, peer in [('entry', w.EXIT_IP), ('exit', w.ENTRY_IP)]:
+            s = dict(role=role, link_private='PRIVATE', peer_public='PUBLIC', psk='PSK',
+                     port=51831, exit_ip='8.8.8.8', exit_port=51830)
+            config = w.link_config(s)
+            self.assertEqual(config.count('[Peer]'), 1)
+            self.assertIn('Table = off', config)
+            self.assertIn('AllowedIPs = '+peer+'/32', config)
+            self.assertNotIn('0.0.0.0/0', config)
+            self.assertNotIn('::/0', config)
+            self.assertNotIn('FwMark', config)
+            self.assertNotIn('PostDown', config)
 
-    def test_bypass_marks_keep_wireguard_bits(self):
-        s = dict(role='entry', wan='eth0', ipv6=False)
-        rules = w.firewall_rules(s, 6)
-        restore = [args for _, _, args in rules if '--restore-mark' in args]
-        self.assertTrue(restore)
-        self.assertTrue(all('--nfmask' in args and '0x40000000' in args for args in restore))
-        self.assertFalse(any('MASQUERADE' in args for _, _, args in rules))
-        self.assertTrue(any(chain == 'WGB_OUTPUT' and 'REJECT' in args for _, chain, args in rules))
+    def test_only_the_selected_port_is_forwarded(self):
+        s = dict(mode=w.MODE, role='entry', wan='eth0', port=51831, exit_ip='8.8.8.8',
+                 exit_port=51830, listen_port=8443, target_port=9443, protocol='tcp')
+        rules = w.firewall_rules(s)
+        dnat = [args for _, chain, args in rules if chain == 'WGB_DNAT']
+        self.assertEqual(len(dnat), 1)
+        self.assertIn('--dst-type', dnat[0])
+        self.assertIn('8443', dnat[0])
+        self.assertIn('10.204.0.1:9443', dnat[0])
+        guards = [args for _, chain, args in rules if chain == 'WGB_FWD' and '--ctorigdstport' in args]
+        self.assertEqual(guards[0][-1], 'ACCEPT')
+        self.assertEqual(guards[1][-1], 'REJECT')
+        self.assertNotIn('-o', guards[1])
+        self.assertFalse(any(parent == 'OUTPUT' for _, parent, _ in w.CHAINS))
+        self.assertFalse(any('MARK' in ' '.join(args) for _, _, args in rules))
+
+    def test_busy_port_and_transport_conflict(self):
+        import socket
+        with socket.socket() as listener:
+            listener.bind(('0.0.0.0',0)); listener.listen()
+            with self.assertRaises(w.BridgeError): w.free_port(listener.getsockname()[1], 'tcp')
+        with self.assertRaises(w.BridgeError):
+            w.check_listener(dict(port=51831, listen_port=51831, protocol='both'))
+        for bad in ['TCP', 'icmp', '', None]:
+            with self.assertRaises(w.BridgeError): w.valid_protocol(bad)
 
 
 if __name__ == '__main__':
