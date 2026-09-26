@@ -29,6 +29,32 @@ class CoreTests(unittest.TestCase):
         p.update(entry_ip='9.9.9.9', entry_port=9999)
         self.assertEqual(w.pairing_decode(w.pairing_encode(p)), p)
 
+    def test_panel_pairing_and_source_routing_config(self):
+        p = self.payload()
+        p.pop('target_port'); p.pop('protocol')
+        p.update(version=3, mode=w.PANEL_MODE, entry_ip='9.9.9.9', entry_port=9999)
+        code = w.pairing_encode(p)
+        self.assertTrue(code.startswith('WGB3.'))
+        self.assertEqual(w.pairing_decode(code), p)
+        with self.assertRaises(w.BridgeError): w.pairing_decode(code.replace('WGB3.', 'WGB2.'))
+        s = dict(mode=w.PANEL_MODE, role='entry', port=9999, exit_ip='8.8.8.8', exit_port=9999,
+                 link_private='PRIVATE', peer_public='PUBLIC', psk='PSK')
+        config = w.link_config(s)
+        self.assertIn('AllowedIPs = 0.0.0.0/0', config)
+        self.assertIn('Table = off', config)
+        self.assertIn('table 51888', config)
+        self.assertNotIn('::/0', config)
+        self.assertNotIn('target_port', w.normalize_state(s))
+
+    def test_panel_firewall_has_no_public_mapping_and_guards_source(self):
+        s = dict(mode=w.PANEL_MODE, role='entry', wan='eth0', port=9999, exit_ip='8.8.8.8', exit_port=9999)
+        rules = w.firewall_rules(s)
+        self.assertFalse(any('DNAT' in args for _, _, args in rules))
+        self.assertIn(('filter', 'WGB_OUT', ['-s','10.204.0.2/32','!','-o','wgb-exit','-j','REJECT']), rules)
+        outside = w.firewall_rules(dict(s, role='exit'))
+        self.assertIn(('nat','WGB_NAT',['-s','10.204.0.2/32','-o','eth0','-j','MASQUERADE']), outside)
+        self.assertFalse(any('--dport' in args and args[-1]=='DNAT' for _,_,args in outside))
+
     def test_pairing_rejects_partial_or_invalid_iran_endpoint(self):
         for extra in [dict(entry_ip='9.9.9.9'), dict(entry_port=9999),
                       dict(entry_ip='9.9.9.9', entry_port=0), dict(entry_ip='127.0.0.1', entry_port=9999)]:

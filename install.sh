@@ -2,8 +2,8 @@
 # WG Bridge bootstrap and lifecycle entry point.
 set -Eeuo pipefail
 REPO="itsalirezaw/wg-bridge"
-REF="v0.3.1"
-CORE_SHA256="a8170a3ec890772c8055d6dd8fbcff1dc3b18ba18f6d44a2f633ed71d44412a1"
+REF="v0.4.0"
+CORE_SHA256="d09e35df573e3391a8d3014af8c653f0518a70f3f0b68186baa01399ea24ee34"
 APP_DIR="/usr/local/lib/wg-bridge"
 MODE="${1:-install}"
 
@@ -50,12 +50,12 @@ if [[ "$MODE" != "--check" ]]; then
     *) echo "Supported: Ubuntu 22.04/24.04/26.04 LTS (including point releases) or Debian 12/13 with systemd." >&2; exit 1 ;;
   esac
   [[ -d /run/systemd/system ]] || { echo "A systemd VPS/VM is required." >&2; exit 1; }
-  if [[ -f /etc/wg-bridge/state.json ]] && ! python3 -c 'import json; s=json.load(open("/etc/wg-bridge/state.json")); raise SystemExit(0 if s.get("mode")=="port-forward-v1" else 1)'; then
+  if [[ -f /etc/wg-bridge/state.json ]] && ! python3 -c 'import json; s=json.load(open("/etc/wg-bridge/state.json")); raise SystemExit(0 if s.get("mode") in ("port-forward-v1","panel-routing-v1") else 1)'; then
     echo 'This installation uses the old full-routing mode. It cannot be upgraded in place.' >&2
     echo 'On Iran, restore direct Internet first:' >&2
     echo '  systemctl stop wg-quick@wgb-exit.service wg-bridge-network.service' >&2
     echo 'Then run wg-bridge uninstall on each host and confirm REMOVE.' >&2
-    echo 'Install v0.3 on Outside first, then pair Iran with the new WGB2 code.' >&2
+    echo 'Install the current release on Outside first, then pair Iran with the new WGB3 code.' >&2
     exit 1
   fi
   if [[ "$MODE" == "install" && -f /etc/wg-bridge/state.json && -f "$APP_DIR/wg_bridge.py" ]]; then
@@ -107,6 +107,7 @@ install -m 755 "$TMP_INSTALL/wg-bridge" /usr/local/sbin/wg-bridge
 if [[ "$MODE" == "--upgrade" ]]; then
   printf '\n  [3/3] Manager upgraded to %s. Tunnel keys and configuration retained.\n' "$REF"
   echo '  Open the menu: sudo wg-bridge'
+  echo '  To convert v0.3 public-port forwarding: run wg-bridge routing on Outside, then Iran.'
   exit 0
 fi
 printf '\n  [3/3] Opening installation menu\n'

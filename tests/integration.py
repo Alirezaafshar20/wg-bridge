@@ -176,11 +176,15 @@ while True:
     def stable_rules(value):
         return [re.sub(r'\[\d+:\d+\]', '[0:0]', line) for line in value.splitlines() if not line.startswith('#')]
     v6_rules_before = {name: stable_rules(ns(name, 'ip6tables-save').stdout) for name in ['ir','out']}
+    panel_active = False
     def unchanged_routing():
         for name in ['ir','out']:
             for family in ['-4','-6']:
-                assert (ns(name, 'ip', family, '-j', 'route', 'show', 'default').stdout,
-                        ns(name, 'ip', family, '-j', 'rule').stdout) == routes_before[name][family]
+                assert ns(name, 'ip', family, '-j', 'route', 'show', 'default').stdout == routes_before[name][family][0]
+                current = json.loads(ns(name, 'ip', family, '-j', 'rule').stdout)
+                if panel_active and name == 'ir':
+                    current = [r for r in current if str(r['priority']) not in (w.SOURCE_PRIORITY,w.INTERFACE_PRIORITY)]
+                assert current == json.loads(routes_before[name][family][1])
             assert stable_rules(ns(name, 'ip6tables-save').stdout) == v6_rules_before[name]
     def direct_services():
         assert fetch('ir', 'http://203.0.113.1:8000') == '192.0.2.2'
@@ -282,6 +286,73 @@ while True:
         assert not ns('ir', 'conntrack', '-L', '-p', proto, '--dst-nat', '--reply-src', w.EXIT_IP).stdout.strip()
     direct_services()
     print('PASS: complete rule cleanup preserves unrelated firewall and routing', flush=True)
+
+    # Panel mode uses real kernel WireGuard and the same bind semantics as
+    # Xray/sing-box: source-IP only, interface only, or both together.
+    panel_active = True
+    for name in ['out', 'ir']:
+        states[name]['mode'] = w.PANEL_MODE
+        w.save(folder/name/'state.json', json.dumps(states[name]))
+        w.save(folder/name/'wgb-exit.conf', w.link_config(states[name]))
+        ns(name, 'sysctl', '-w', 'net.ipv4.conf.all.rp_filter=1')
+        apply(name, folder, True)
+        ns(name, 'wg-quick', 'up', folder/name/'wgb-exit.conf')
+    for source in [w.ENTRY_IP, w.LINK]:
+        assert fetch('ir', 'http://203.0.113.1:8000', source) == '198.51.100.2'
+    direct_services()
+    fetch('ir', 'http://[fdff::1]:8002', w.LINK, ok=False)
+    assert ns('ir', 'sysctl', '-n', 'net.ipv4.conf.all.rp_filter').stdout.strip() == '1'
+    before = ns('ir', 'iptables-save').stdout
+    rules_before_panel = ns('ir', 'ip', '-j', 'rule').stdout
+    apply('ir', folder, True)
+    assert stable_rules(before) == stable_rules(ns('ir', 'iptables-save').stdout)
+    assert rules_before_panel == ns('ir', 'ip', '-j', 'rule').stdout
+    background('wan', '''
+import socket
+s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.bind(('203.0.113.1',5353))
+while True:
+    data,addr=s.recvfrom(65535);s.sendto(addr[0].encode()+b'|'+data,addr)
+''')
+    background('wan', '''
+import socket
+s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.bind(('203.0.113.1',53))
+while True:
+    q,addr=s.recvfrom(4096)
+    answer=q[:2]+b'\\x81\\x80\\x00\\x01\\x00\\x01\\x00\\x00\\x00\\x00'+q[12:]+b'\\xc0\\x0c\\x00\\x01\\x00\\x01\\x00\\x00\\x00\\x3c\\x00\\x04'+socket.inet_aton('203.0.113.1')
+    s.sendto(answer,addr)
+''')
+    time.sleep(0.3)
+    def panel_udp(ok=True):
+        p=ns('ir','python3','-c',
+             "import socket;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(2);"
+             "s.bind(('10.204.0.2',0));s.sendto(b'x'*4096,('203.0.113.1',5353));"
+             "assert s.recv(8192)==b'198.51.100.2|'+b'x'*4096",check=False)
+        assert (p.returncode==0)==ok,p.stderr
+    panel_udp()
+    ns('ir','python3','-c',
+       "import socket;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(3);"
+       "s.bind(('10.204.0.2',0));q=b'\\x12\\x34\\x01\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x07example\\x03com\\x00\\x00\\x01\\x00\\x01';"
+       "s.sendto(q,('203.0.113.1',53));a=s.recv(4096);assert a[:2]==q[:2] and a[2]&128 and a[-4:]==socket.inet_aton('203.0.113.1')")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=40) as pool:
+        assert all(x=='198.51.100.2' for x in pool.map(lambda _: fetch('ir','http://203.0.113.1:8000',w.ENTRY_IP),range(300)))
+    print('PASS: panel source/interface binding, UDP fragmentation, DNS, strict rp_filter and concurrent TCP; other services unchanged',flush=True)
+    for stop in ['out','ir']:
+        ns(stop,'wg-quick','down',folder/stop/'wgb-exit.conf')
+        fetch('ir','http://203.0.113.1:8000',w.ENTRY_IP,ok=False)
+        fetch('ir','http://203.0.113.1:8000',w.LINK,ok=False)
+        panel_udp(ok=False)
+        direct_services()
+        ns(stop,'wg-quick','up',folder/stop/'wgb-exit.conf')
+        assert fetch('ir','http://203.0.113.1:8000',w.ENTRY_IP)=='198.51.100.2'
+    print('PASS: panel tunnel failure, interface removal and restart fail closed without affecting host services',flush=True)
+    for name in ['ir','out']:
+        ns(name,'wg-quick','down',folder/name/'wgb-exit.conf')
+        apply(name,folder,False)
+        assert 'WGB_' not in ns(name,'iptables-save').stdout
+        ns(name,'iptables','-C','INPUT','-j','UNRELATED')
+    panel_active=False
+    direct_services()
+    print('PASS: panel route/firewall cleanup preserves host IPv4/IPv6 defaults, unrelated routing and established inbound session',flush=True)
 
 
 

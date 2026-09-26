@@ -41,7 +41,7 @@ def main():
     absent()
     before = {k: w.run(['sysctl', '-n', k]) for k in ['net.ipv4.ip_forward', 'net.ipv6.conf.all.forwarding', 'net.ipv4.conf.all.rp_filter']}
     try:
-        call(['script', '-q', '-e', '-c', 'bash install.sh', '/dev/null'], '2\n8.8.8.8\n\n9.9.9.9\n51831\n8443\nboth\n')
+        call(['script', '-q', '-e', '-c', 'bash install.sh', '/dev/null'], '2\n8.8.8.8\n\n9.9.9.9\n51831\n')
         state = w.load()
         assert state['role'] == 'exit'
         assert state['port'] == 9999
@@ -67,7 +67,7 @@ def main():
         assert call(['/usr/local/sbin/wg-bridge', 'version']).strip() == w.VERSION
         call(['/usr/local/sbin/wg-bridge', 'peer', '1.1.1.1', '32123'])
         changed=w.load()
-        assert changed['link_private']==state['link_private'] and changed['target_port']==state['target_port']
+        assert changed['link_private']==state['link_private'] and changed['mode']==w.PANEL_MODE
         assert '1.1.1.1:32123' in call(['wg','show',w.LINK,'endpoints'])
         assert w.pairing_decode(changed['pairing'])['entry_port']==32123
         call(['/usr/local/sbin/wg-bridge', 'peer', '9.9.9.9', '51831'])
@@ -101,6 +101,32 @@ def main():
         # A cancelled uninstall must preserve both network and manager.
         call(['script', '-q', '-e', '-c', 'bash install.sh --uninstall', '/dev/null'], 'CANCEL\n')
         assert config.exists() and w.APP.exists() and w.LAUNCHER.exists()
+        # Reconstruct a v0.3 installation, then exercise transactional conversion.
+        pair=w.pairing_decode(state['pairing'])
+        pair.pop('mode'); pair.update(version=2,target_port=8443,protocol='both')
+        old=dict(state,mode=w.MODE,target_port=8443,protocol='both',pairing=w.pairing_encode(pair),sysctl_before={})
+        call(['systemctl','stop','wg-quick@'+w.LINK])
+        call(['systemctl','stop','wg-bridge-network'])
+        w.run(['sysctl','-w','net.ipv4.ip_forward='+before['net.ipv4.ip_forward']])
+        w.persist(old); w.save(config,w.link_config(old)); w.services(old)
+        old_config=config.read_bytes()
+        real_services=w.services
+        def fail_conversion(s):
+            real_services(s)
+            raise w.BridgeError('injected conversion failure')
+        with patch.object(w,'services',side_effect=fail_conversion), contextlib.redirect_stdout(io.StringIO()):
+            try:w.enable_routing(old)
+            except w.BridgeError:pass
+            else:raise AssertionError('Conversion failure expected')
+        assert w.load()==old and config.read_bytes()==old_config
+        assert w.run(['sysctl','-n','net.ipv4.ip_forward'])==before['net.ipv4.ip_forward']
+        call(['/usr/local/sbin/wg-bridge','routing'])
+        converted=w.load()
+        assert converted['mode']==w.PANEL_MODE and converted['link_private']==old['link_private']
+        assert converted['port']==old['port'] and w.pairing_decode(converted['pairing'])['version']==3
+        digest=config.read_bytes()
+        call(['/usr/local/sbin/wg-bridge','routing'])
+        assert config.read_bytes()==digest
         with contextlib.redirect_stdout(io.StringIO()):
             w.uninstall(w.load(), confirm=False, purge=False)
         absent()
@@ -110,7 +136,7 @@ def main():
         def fail_services(state):
             real_services(state)
             raise w.BridgeError('injected service failure')
-        with patch.object(w, 'prompt', side_effect=['2', '8.8.8.8', '51830', '9.9.9.9', '51831', '8443', 'both']), patch.object(w, 'detect_ip', return_value=''), patch.object(w, 'services', side_effect=fail_services), contextlib.redirect_stdout(io.StringIO()):
+        with patch.object(w, 'prompt', side_effect=['2', '8.8.8.8', '51830', '9.9.9.9', '51831']), patch.object(w, 'detect_ip', return_value=''), patch.object(w, 'services', side_effect=fail_services), contextlib.redirect_stdout(io.StringIO()):
             try: w.install()
             except w.BridgeError as exc: assert str(exc) == 'injected service failure'
             else: raise AssertionError('Expected failure did not occur')
@@ -120,7 +146,7 @@ def main():
         # the public mapping. Host defaults and existing SSH routing must stay.
         route_before = call(['ip', '-j', 'route', 'show', 'default'])
         rules_before = call(['ip', '-j', 'rule'])
-        entry_answers = '1\n'+state['pairing']+'\n9.9.9.9\n51831\n8443\n'
+        entry_answers = '1\n'+old['pairing']+'\n9.9.9.9\n51831\n8443\n'
         call(['script', '-q', '-e', '-c', 'bash install.sh', '/dev/null'], entry_answers)
         entry = w.load()
         assert entry['role'] == 'entry' and entry['listen_port'] == 8443
@@ -129,16 +155,38 @@ def main():
         assert w.load()['listen_port'] == 9443 and config.read_bytes() == entry_config
         assert call(['ip', '-j', 'route', 'show', 'default']) == route_before
         assert call(['ip', '-j', 'rule']) == rules_before
+        old_entry=w.load()
+        old_entry_bytes=config.read_bytes()
+        with patch.object(w,'services',side_effect=fail_conversion), contextlib.redirect_stdout(io.StringIO()):
+            try:w.enable_routing(old_entry)
+            except w.BridgeError:pass
+            else:raise AssertionError('Iran conversion failure expected')
+        assert w.load()==old_entry and config.read_bytes()==old_entry_bytes
+        assert call(['ip','-j','rule'])==rules_before
+        call(['/usr/local/sbin/wg-bridge','routing'])
+        assert w.load()['mode']==w.PANEL_MODE and w.load()['link_private']==old_entry['link_private']
+        assert call(['ip','-j','route','show','default'])==route_before
+        assert 'wgb-exit' in call(['ip','route','get','1.1.1.1','from',w.ENTRY_IP])
+        call(['systemctl','stop','wg-quick@'+w.LINK])
+        assert subprocess.run(['ip','route','get','1.1.1.1','from',w.ENTRY_IP],capture_output=True).returncode!=0
+        assert 'unreachable default' in call(['ip','route','show','table',w.ROUTE_TABLE])
+        call(['systemctl','start','wg-quick@'+w.LINK])
+        assert 'wgb-exit' in call(['ip','route','get','1.1.1.1','from',w.ENTRY_IP])
         with contextlib.redirect_stdout(io.StringIO()):
             w.uninstall(w.load(), confirm=False, purge=False)
         absent()
         assert all(w.run(['sysctl', '-n', k]) == v for k, v in before.items())
-        call(['script', '-q', '-e', '-c', 'bash install.sh', '/dev/null'], '2\n8.8.8.8\n\n9.9.9.9\n\n8443\nboth\n')
+        assert call(['ip','-j','rule'])==rules_before
+        call(['script','-q','-e','-c','bash install.sh','/dev/null'],'1\n'+state['pairing']+'\n9.9.9.9\n51831\n')
+        assert w.load()['mode']==w.PANEL_MODE
+        with contextlib.redirect_stdout(io.StringIO()):w.uninstall(w.load(),confirm=False,purge=False)
+        absent()
+        call(['script', '-q', '-e', '-c', 'bash install.sh', '/dev/null'], '2\n8.8.8.8\n\n9.9.9.9\n\n')
         assert w.load()['port']==9999 and w.load()['entry_port']==9999
         call(['script', '-q', '-e', '-c', 'bash install.sh --uninstall', '/dev/null'], 'REMOVE\n')
         absent()
         assert not w.APP.exists() and not w.LAUNCHER.exists()
-        print('PASS: both roles, failed handshake isolation, port editing, upgrade, legacy rejection, cancellation, rollback and complete uninstall')
+        print('PASS: both modes/roles, upgrade, legacy rejection, transactional conversions and rollback, restart guards, cancellation and complete uninstall')
     finally:
         if (w.STATE/'state.json').exists():
             with contextlib.redirect_stdout(io.StringIO()): w.uninstall(w.load(), confirm=False)
