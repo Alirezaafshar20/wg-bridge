@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+*.conf
+*.key
+*.db
+*.png
+*.zip
+*.tar.gz
+test-results/
+.env*
+!*.example

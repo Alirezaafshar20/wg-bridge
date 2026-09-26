@@ -1,0 +1,31 @@
+name: Tunnel tests
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  network:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wireguard-tools iproute2 iptables conntrack iputils-ping curl kmod procps shellcheck
+          sudo modprobe wireguard
+      - name: Syntax and checksum
+        run: |
+          shellcheck install.sh
+          bash -n install.sh
+          bash install.sh --check
+          python3 -m py_compile wg_bridge.py tests/*.py
+      - name: Unit tests
+        run: python3 -m unittest discover -s tests -v
+      - name: Real WireGuard network tests
+        run: sudo python3 tests/integration.py
+      - name: Installer lifecycle on disposable VM
+        run: sudo env GITHUB_ACTIONS=true WGB_DISPOSABLE_CI=YES python3 tests/lifecycle.py
