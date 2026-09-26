@@ -12,7 +12,7 @@ Run your panel on Iran and send selected outbounds through kernel WireGuard to a
 
 Upgrade both hosts using the README, then run `wg-bridge routing` on Outside and Iran. Existing panel-routing installs need only the manager upgrade. Older v0.1/v0.2 full-routing installations require uninstall/reinstall. WGB2 remains supported for existing legacy mappings.
 
-Validation covers real WireGuard TCP/UDP/DNS, source/interface binding, strict reverse-path filtering, 300 concurrent-request checks per mode, tunnel failures, unrelated services, conversion rollback and installer lifecycle. These are correctness checks, not a throughput or user-capacity guarantee.
+All CI checks passed on Ubuntu 22.04, 24.04 and 26.04. Validation covers real WireGuard TCP/UDP/DNS, source/interface binding, strict reverse-path filtering, 300 HTTP requests with 40 workers per mode, tunnel failures, unrelated services, conversion rollback and installer lifecycle. A live pair also passed Xray 26.9.9 TCP/UDP/DNS and stop/restart tests. These are correctness checks, not a throughput or user-capacity guarantee. [Validation record](docs/validation.md).
 
 [English installation](README.md) · [نصب فارسی](README.fa.md) · [Panel guide](docs/panels.md) · [راهنمای پنل](docs/panels.fa.md)
 

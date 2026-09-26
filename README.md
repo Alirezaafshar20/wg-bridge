@@ -103,7 +103,7 @@ journalctl -u wg-bridge-network -u wg-quick@wgb-exit --no-pager -n 60
 
 MTU is `1380`. Table `51888` and priorities `18880/18881` are reserved for the selected source/interface. Conflicts are rejected before installation or conversion. Existing custom routing and independent nftables/firewall managers need manual integration. Do not flush firewall rules while the tunnel is in use; rerun restart and doctor after firewall changes. WG Bridge does not configure provider firewalls or protocol obfuscation.
 
-[Network design](docs/network.md) · [Validation](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Persian recording guide](docs/video-fa.md)
+[Network design](docs/network.md) · [Release validation](docs/validation.md) · [Development](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Persian recording guide](docs/video-fa.md)
 
 Created by **alirezaw** · [GitHub](https://github.com/itsalirezaw) · [YouTube @ialirezaw](https://www.youtube.com/@ialirezaw)
 

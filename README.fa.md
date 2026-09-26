@@ -101,6 +101,6 @@ journalctl -u wg-bridge-network -u wg-quick@wgb-exit --no-pager -n 60
 
 MTU برابر 1380 است. جدول 51888 و اولویت‌های 18880/18881 به مسیر انتخابی اختصاص دارند؛ تداخل پیش از نصب یا تبدیل رد می‌شود. مسیریابی سفارشی و مدیر فایروال مستقل به بررسی دستی نیاز دارند. هنگام استفاده، فایروال را پاک نکنید؛ پس از تغییر فایروال، Restart و doctor را اجرا کنید. اسکریپت فایروال ارائه‌دهنده یا مبهم‌سازی پروتکل را تنظیم نمی‌کند.
 
-[طرح شبکه](docs/network.md) · [آزمون‌ها](CONTRIBUTING.md) · [تغییرات](CHANGELOG.md) · [راهنمای ضبط ویدیو](docs/video-fa.md)
+[طرح شبکه](docs/network.md) · [نتیجه آزمون نسخه](docs/validation.md) · [توسعه](CONTRIBUTING.md) · [تغییرات](CHANGELOG.md) · [راهنمای ضبط ویدیو](docs/video-fa.md)
 
 ساخته‌شده توسط **alirezaw** · [GitHub](https://github.com/itsalirezaw) · [YouTube @ialirezaw](https://www.youtube.com/@ialirezaw)
