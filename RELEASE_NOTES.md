@@ -1,24 +1,26 @@
-# WG Bridge v0.3.0
+# WG Bridge v0.3.1
 
-WG Bridge now forwards **one selected IPv4 service port** from Iran to a service on Outside through WireGuard. The installer suggests available random ports, with configurable public/target ports and **TCP, UDP or both**.
+WireGuard transport now defaults to **UDP 9999** on both servers. The transport port remains editable and is separate from the single forwarded service port.
 
-- Remove full-host routing, WireGuard default routes, policy marks, the dummy sink and IPv6 egress changes. Ordinary host Internet traffic keeps its route.
-- Keep the selected mapping isolated when the peer or tunnel is down; unrelated inbound services and LAN forwarding continue to use their existing paths.
-- Add Iran public-port editing through the menu or `wg-bridge port PORT`.
-- Use **WGB2** pairing to carry the target port and protocol. The destination application runs on Outside and must accept the private tunnel address.
-- Add visible pairing input, clearer step explanations, colored “Press Enter to use …” defaults and a grouped menu opened directly with `wg-bridge`. Retain the alirezaw creator links and Ubuntu 26.04.1 support.
+Outside setup now asks for Iran's public IPv4 and planned WireGuard UDP port. Both peers receive an explicit endpoint and a 25-second keepalive, allowing either server to initiate. The pairing code carries the Iran endpoint, and Iran setup rejects a mismatch before modifying the network.
 
-**Migration:** v0.1/v0.2 full-routing installations require uninstall/reinstall on both hosts. On Iran, stop `wg-quick@wgb-exit.service` and `wg-bridge-network.service` to restore direct Internet first. Remove the old tunnel with `wg-bridge uninstall`, then install Outside followed by Iran with a fresh WGB2 code. `--upgrade` rejects legacy state before modifying the installed manager; it remains available for compatible v0.3 installations.
+- Open the selected WireGuard UDP ports in both provider firewalls; any chosen port still needs a working network path.
+- Use Outside menu option **8 — Set Iran peer endpoint**, or `wg-bridge peer IRAN_PUBLIC_IPV4 IRAN_WIREGUARD_UDP_PORT`, to configure the remote endpoint without replacing keys. An active tunnel restarts; changes roll back if that restart fails.
+- Compatible upgrades preserve existing ports and configuration. After upgrading an older pair, use the Outside peer command with Iran's **current** WireGuard port to enable bidirectional initiation. The new default does not silently move existing installations.
+- New managers accept older WGB2 codes. Use v0.3.1 or newer on both hosts for codes containing the new peer fields.
+- One selected IPv4 TCP/UDP service port is forwarded; ordinary Internet routes and host IPv6 remain unchanged.
 
-Validation covers real TCP/UDP forwarding, host route preservation, peer failure, stopped interfaces, port changes, lifecycle rollback and complete removal on Ubuntu 22.04, 24.04 and 26.04. This remains a preview release; correctness tests do not establish production capacity.
+Validation covers actual WireGuard initiation from Outside, TCP/UDP forwarding, custom ports, preserved host connectivity, peer changes, rollback, upgrade and uninstall on Ubuntu 22.04, 24.04 and 26.04. This is a preview release; these tests do not establish production capacity or guarantee that a provider permits every UDP port.
 
 [English](https://github.com/itsalirezaw/wg-bridge#readme) · [فارسی](https://github.com/itsalirezaw/wg-bridge/blob/main/README.fa.md)
 
 <details>
 <summary>توضیحات فارسی</summary>
 
-نسخهٔ 0.3 فقط یک پورت IPv4 انتخابی ایران را از داخل WireGuard به سرویس خارج منتقل می‌کند. پورت‌های آزاد تصادفی پیشنهاد می‌شوند و پورت ورودی، پورت مقصد و TCP/UDP قابل انتخاب‌اند. کد اتصال هنگام ورود دیده می‌شود و پیش‌فرض‌های رنگی با راهنمای Enter نمایش داده می‌شوند. منو مستقیماً با `wg-bridge` باز می‌شود. مسیر اینترنت عمومی و IPv6 سرور تغییر نمی‌کند؛ قطع تانل فقط همان نگاشت را از دسترس خارج می‌کند. تغییر پورت ایران از منو یا فرمان `wg-bridge port PORT` ممکن است.
+پیش‌فرض پورت ارتباط خود WireGuard روی هر دو سرور **UDP 9999** است و همچنان می‌توانید پورت دلخواه را وارد کنید. پورت سرویس جداست و فقط همان یک پورت از ایران به خارج منتقل می‌شود.
 
-برای انتقال از 0.1 یا 0.2 ابتدا هر دو سرویس WG Bridge را روی ایران متوقف کنید، تانل قدیمی را روی هر دو سمت حذف کنید و نصب جدید را از خارج شروع کنید. کد جدید WGB2 لازم است؛ کد WGB1 قابل استفاده نیست. برنامهٔ مقصد باید روی خارج فعال باشد. راهنمای دقیق در README فارسی آمده است.
+در نصب خارج، IP عمومی و پورت WireGuard ایران هم پرسیده می‌شود تا هر دو سمت بتوانند ارتباط را آغاز کنند. Keepalive هر دو طرف ۲۵ ثانیه است. مقادیر ایران داخل کد اتصال قرار می‌گیرند و نصب ایران تطابقشان را بررسی می‌کند. UDP ارتباط WireGuard باید در فایروال ارائه‌دهندهٔ هر دو سرور باز باشد.
+
+برای نصب قبلی، ابتدا مدیر هر دو سمت را ارتقا دهید و سپس روی خارج گزینهٔ 8، Set Iran peer endpoint، را با IP و پورت فعلی WireGuard ایران اجرا کنید. کلیدها حفظ می‌شوند؛ ارتقا پورت‌های قبلی را خودکار به 9999 تغییر نمی‌دهد. مدیر جدید کدهای WGB2 قدیمی را می‌پذیرد؛ برای کد جدید، هر دو سمت باید نسخهٔ 0.3.1 یا جدیدتر باشند.
 
 </details>

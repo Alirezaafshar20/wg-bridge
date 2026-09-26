@@ -4,11 +4,11 @@ WG Bridge v0.3 forwards one IPv4 TCP/UDP port from Iran to a service running on 
 
 ## Transport and addressing
 
-The Iran host is **Server (entry)**; the outside host is **Client (exit)**. These are deployment labels. Iran initiates WireGuard UDP to Outside, with a 25-second keepalive. The service port is independent of the WireGuard UDP transport port. The installer suggests available random ports between 20000 and 59999; each is editable. Iran reuses the destination service port if locally available. Port randomization is a convenience, not a guarantee of secrecy or availability.
+The Iran host is **Server (entry)**; the outside host is **Client (exit)**. These are deployment labels. Both peers have an explicit UDP endpoint and a 25-second keepalive, allowing either to initiate. The default transport port is **9999/UDP** on both sides. Outside setup asks for Iran's public IPv4 and planned UDP port; Iran setup checks these against the pairing code before changing the network. All transport ports remain configurable. The separate service port gets a free random suggestion between 20000 and 59999; Iran reuses that destination service port if locally available. Neither a default nor randomization guarantees network reachability.
 
 Interface `wgb-exit` has MTU 1380. Iran uses `10.204.0.2/30`; Outside uses `10.204.0.1/30`. Each peer permits only the other's private `/32`. Both configs use `Table = off`; assigning the interface address supplies the connected private route. No default routes, policy rules, packet marks or dummy interfaces are installed. Host IPv6 is untouched.
 
-The WGB2 pairing payload carries the target service port/protocol and keys. It is encoded, not encrypted. One code provisions one pair. WGB1 belongs to the old full-routing architecture and is rejected explicitly.
+The WGB2 pairing payload carries the target service port/protocol and keys. v0.3.1 adds the paired Iran IPv4 and UDP port together as optional fields; new managers accept v0.3.0 codes, while new codes require v0.3.1 on Iran. It is encoded, not encrypted. One code provisions one pair. WGB1 belongs to the old full-routing architecture and is rejected explicitly.
 
 ## Packet path
 
@@ -26,9 +26,11 @@ The network service precedes `wg-quick@wgb-exit`. Rules use scoped `WGB_IN`, `WG
 
 Changing Iran's public port validates availability before changing rules, preserves keys and the target port, and restores the old mapping on failure. Active forwarded connections can be interrupted. The protocol and outside target remain fixed for the pair; changing them requires reinstalling/re-pairing both hosts.
 
+Outside's `peer IRAN_IP IRAN_WG_PORT` command updates its saved peer endpoint and pairing code without rotating keys or changing service ports. An active interface is restarted; an inactive one remains inactive. On failure, the original configuration and state are restored. Upgrading the manager alone preserves old port defaults and configurations; run this command to opt an existing Outside installation into bidirectional initiation. It never edits the Iran host remotely.
+
 ## Integration boundaries
 
-Forwarding applies to public IPv4 ingress through the selected WAN interface. There is no IPv6 port forwarding, local hairpin redirect, transparent proxy selection, user accounting or end-user VPN provisioning. Provider firewalls must permit Iran's chosen service port and Outside's WireGuard UDP port.
+Forwarding applies to public IPv4 ingress through the selected WAN interface. There is no IPv6 port forwarding, local hairpin redirect, transparent proxy selection, user accounting or end-user VPN provisioning. Provider firewalls must permit Iran's chosen service port and the WireGuard UDP ports on both hosts.
 
 Active firewalld, overlapping private subnets and existing IPv4 policy routing are refused. An occupied local socket is detected, but a Docker-published port or custom NAT redirect can exist without a host listener; these configurations need explicit review. Separate nftables base chains may drop packets even after iptables accepts them. Firewall reloads can remove the rules; restart the manager's tunnel after reviewing such changes. WireGuard requires a working UDP path and does not obfuscate its protocol.
 

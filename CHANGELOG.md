@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1 — 2026-09-26
+
+- Default new WireGuard transport listeners to UDP 9999; keep both peer ports editable and service ports independent.
+- Configure Outside with Iran's public endpoint and enable 25-second keepalives on both peers so either side can initiate.
+- Carry Iran's planned endpoint in WGB2 pairing; reject mismatched Iran setup before network changes. Continue accepting older WGB2 codes.
+- Add Outside menu/CLI peer editing with key preservation, refreshed pairing codes and rollback on restart failure. Upgrades retain existing ports and configs.
+- Test Outside-initiated handshakes, default/custom ports, peer edits and rollback on Ubuntu 22.04, 24.04 and 26.04.
+
 ## 0.3.0 — 2026-09-26
 
 - Replace full-host routing with one configurable IPv4 port mapping from Iran to Outside. Suggest random available service/transport ports; select TCP, UDP or both.

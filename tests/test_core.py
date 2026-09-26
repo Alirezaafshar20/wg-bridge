@@ -26,6 +26,21 @@ class CoreTests(unittest.TestCase):
     def test_pairing_round_trip(self):
         p = self.payload()
         self.assertEqual(w.pairing_decode(w.pairing_encode(p)), p)
+        p.update(entry_ip='9.9.9.9', entry_port=9999)
+        self.assertEqual(w.pairing_decode(w.pairing_encode(p)), p)
+
+    def test_pairing_rejects_partial_or_invalid_iran_endpoint(self):
+        for extra in [dict(entry_ip='9.9.9.9'), dict(entry_port=9999),
+                      dict(entry_ip='9.9.9.9', entry_port=0), dict(entry_ip='127.0.0.1', entry_port=9999)]:
+            with self.subTest(extra=extra), self.assertRaises(w.BridgeError):
+                w.pairing_decode(w.pairing_encode(dict(self.payload(), **extra)))
+
+    def test_iran_endpoint_must_match_pairing_before_install(self):
+        p = dict(self.payload(), entry_ip='9.9.9.9', entry_port=9999)
+        w.check_paired_entry(p, dict(public_ip='9.9.9.9', port=9999))
+        for s in [dict(public_ip='1.1.1.1', port=9999), dict(public_ip='9.9.9.9', port=10000)]:
+            with self.assertRaises(w.BridgeError): w.check_paired_entry(p, s)
+        w.check_paired_entry(self.payload(), dict(public_ip='9.9.9.9', port=10000))
 
     def test_pairing_rejects_corruption_and_extra_fields(self):
         encoded = w.pairing_encode(self.payload())
@@ -72,6 +87,15 @@ class CoreTests(unittest.TestCase):
             self.assertNotIn('::/0', config)
             self.assertNotIn('FwMark', config)
             self.assertNotIn('PostDown', config)
+            self.assertIn('PersistentKeepalive = 25', config)
+
+    def test_outside_can_initiate_and_custom_transport_port_is_retained(self):
+        s = dict(role='exit', link_private='PRIVATE', peer_public='PUBLIC', psk='PSK',
+                 port=9999, entry_ip='9.9.9.9', entry_port=32123)
+        config = w.link_config(s)
+        self.assertIn('Endpoint = 9.9.9.9:32123', config)
+        self.assertIn('ListenPort = 9999', config)
+        self.assertIn('PersistentKeepalive = 25', config)
 
     def test_only_the_selected_port_is_forwarded(self):
         s = dict(mode=w.MODE, role='entry', wan='eth0', port=51831, exit_ip='8.8.8.8',

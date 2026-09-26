@@ -18,7 +18,8 @@ import sys
 import tempfile
 import time
 
-VERSION = '0.3.0'
+VERSION = '0.3.1'
+DEFAULT_WG_PORT = 9999
 MODE = 'port-forward-v1'
 AUTHOR = 'alirezaw'
 GITHUB_URL = 'https://github.com/itsalirezaw'
@@ -88,6 +89,9 @@ def normalize_state(s):
         s['listen_port'] = valid_port(s['listen_port'])
         s['exit_ip'] = valid_ip(s['exit_ip'])
         s['exit_port'] = valid_port(s['exit_port'])
+    elif 'entry_ip' in s or 'entry_port' in s:
+        s['entry_ip'] = valid_ip(s.get('entry_ip'))
+        s['entry_port'] = valid_port(s.get('entry_port'))
     return s
 
 
@@ -162,7 +166,7 @@ def pairing_decode(code):
         expected = {'version', 'server_ip', 'server_port', 'server_public', 'client_private', 'psk', 'target_port', 'protocol'}
         if prefix != 'WGB2' or hashlib.sha256(raw).hexdigest()[:16] != checksum:
             raise ValueError()
-        if not isinstance(p, dict) or set(p) != expected or type(p['version']) is not int or p['version'] != 2:
+        if not isinstance(p, dict) or set(p) not in (expected, expected | {'entry_ip', 'entry_port'}) or type(p['version']) is not int or p['version'] != 2:
             raise ValueError()
         p['server_ip'] = valid_ip(p['server_ip'])
         for field in ['server_port', 'target_port']:
@@ -170,6 +174,9 @@ def pairing_decode(code):
         p['protocol'] = valid_protocol(p['protocol'])
         for k in ['server_public', 'client_private', 'psk']:
             valid_key(p[k])
+        if 'entry_ip' in p:
+            p['entry_ip'] = valid_ip(p['entry_ip'])
+            p['entry_port'] = valid_port(p['entry_port'])
         return p
     except (ValueError, TypeError, KeyError, UnicodeError):
         raise BridgeError('Invalid or incomplete pairing code. Copy it again from the outside server.') from None
@@ -303,8 +310,17 @@ def link_config(s):
     text += f'ListenPort = {s["port"]}\nTable = off\n'
     text += f'\n[Peer]\nPublicKey = {s["peer_public"]}\nPresharedKey = {s["psk"]}\nAllowedIPs = {peer}/32\n'
     if not outside:
-        text += f'Endpoint = {s["exit_ip"]}:{s["exit_port"]}\nPersistentKeepalive = 25\n'
+        text += f'Endpoint = {s["exit_ip"]}:{s["exit_port"]}\n'
+    elif s.get('entry_ip'):
+        text += f'Endpoint = {s["entry_ip"]}:{s["entry_port"]}\n'
+    text += 'PersistentKeepalive = 25\n'
     return text
+
+
+def check_paired_entry(pairing, s):
+    if 'entry_ip' in pairing and (s['public_ip'], s['port']) != (pairing['entry_ip'], pairing['entry_port']):
+        raise BridgeError('Iran IP/UDP port differs from the Outside pairing. On Outside run: '
+                          f'wg-bridge peer {s["public_ip"]} {s["port"]}; then copy its refreshed WGB2 code.')
 
 
 CHAINS = [('filter', 'INPUT', 'WGB_IN'), ('filter', 'FORWARD', 'WGB_FWD'),
@@ -445,14 +461,20 @@ def install():
                   'link_private': pairing['client_private'], 'peer_public': pairing['server_public'],
                   'psk': pairing['psk'], 'target_port': pairing['target_port'], 'protocol': pairing['protocol']})
     location = 'Outside' if s['role'] == 'exit' else 'Iran'
-    step('THIS SERVER', 'Use the public IPv4 of this '+location+' server. The detected address is suggested below.')
-    s['public_ip'] = valid_ip(prompt(location+' server public IPv4', detect_ip()))
+    suggested_ip = pairing.get('entry_ip') if s['role'] == 'entry' else None
+    step('THIS SERVER', 'Confirm the Iran public IPv4 configured on Outside.' if suggested_ip else
+         'Use the public IPv4 of this '+location+' server. The detected address is suggested below.')
+    s['public_ip'] = valid_ip(prompt(location+' server public IPv4', suggested_ip or detect_ip()))
     step('WIREGUARD CONNECTION', 'This UDP port carries the encrypted link between the servers; it is separate from the service port.')
-    if s['role'] == 'exit':
-        print('  Allow the selected UDP port in the Outside provider firewall.\n')
-    s['port'] = valid_port(prompt('WireGuard UDP port on '+location, suggest_port(exclude=(s.get('target_port'),))))
+    print('  Allow the selected UDP port in this server provider firewall.\n')
+    suggested_wg_port = pairing.get('entry_port', DEFAULT_WG_PORT) if s['role'] == 'entry' else DEFAULT_WG_PORT
+    s['port'] = valid_port(prompt('WireGuard UDP port on '+location, str(suggested_wg_port)))
     s['wan'] = default_device()
     if s['role'] == 'exit':
+        step('IRAN PEER', 'Enter the public IPv4 and WireGuard UDP port of your Iran server. Both servers can then initiate the link.')
+        s['entry_ip'] = valid_ip(prompt('Iran server public IPv4'))
+        s['entry_port'] = valid_port(prompt('WireGuard UDP port planned on Iran', str(s['port'])))
+        print('  Allow this UDP port in the Iran provider firewall. These values will be carried in the pairing code.\n')
         step('DESTINATION SERVICE', 'Enter the port your application uses on Outside, or accept a suggested free port and configure the application to use it.')
         s['target_port'] = valid_port(prompt('Application port on Outside', suggest_port('both', (s['port'],))))
         print('\n  TCP is used by most stream services; UDP is used by datagram services.')
@@ -461,6 +483,9 @@ def install():
         if 'udp' in protocols(s) and s['target_port'] == s['port']:
             raise BridgeError('The service UDP port must differ from the WireGuard transport port.')
     else:
+        check_paired_entry(pairing, s)
+        if 'entry_ip' not in pairing:
+            print(f'  Older pairing code: enable two-way initiation on Outside with: wg-bridge peer {s["public_ip"]} {s["port"]}')
         step('PUBLIC SERVICE PORT', 'Users connect to this port on Iran. Only these incoming connections are forwarded; other services keep their routes.')
         print(f'  Outside destination: {EXIT_IP}:{s["target_port"]} ({s["protocol"]})\n')
         suggested = str(s['target_port'])
@@ -477,7 +502,8 @@ def install():
         s['psk'] = run(['wg', 'genpsk'])
         s['pairing'] = pairing_encode({'version': 2, 'server_ip': s['public_ip'], 'server_port': s['port'],
                                       'server_public': server_public, 'client_private': client_private,
-                                      'psk': s['psk'], 'target_port': s['target_port'], 'protocol': s['protocol']})
+                                      'psk': s['psk'], 'target_port': s['target_port'], 'protocol': s['protocol'],
+                                      'entry_ip': s['entry_ip'], 'entry_port': s['entry_port']})
     keys = ['net.ipv4.ip_forward'] if s['role'] == 'entry' else []
     s['sysctl_before'] = {k: run(['sysctl', '-n', k]) for k in keys}
     STATE.mkdir(mode=0o700, exist_ok=True)
@@ -528,6 +554,8 @@ def doctor(s):
     if s['role'] == 'exit':
         print(f'The destination application must listen on 0.0.0.0:{s["target_port"]} or {EXIT_IP}:{s["target_port"]}.')
         print('Allow WireGuard UDP '+str(s['port'])+' in the outside provider firewall.')
+        if s.get('entry_ip'):
+            print(f'Outside initiates to Iran {s["entry_ip"]}:{s["entry_port"]}; allow that UDP port on Iran too.')
         return True
     run(['ping', '-c', '1', '-W', '2', '-I', ENTRY_IP, EXIT_IP], check=False)
     for _ in range(10):
@@ -618,6 +646,31 @@ def change_port(s, value=None):
     print('Updated: '+mapping(updated))
 
 
+def change_peer(s, address=None, port=None):
+    if s['role'] != 'exit':
+        raise BridgeError('Configure the Iran peer on Client (Outside).')
+    updated = dict(s, entry_ip=valid_ip(address or prompt('Iran server public IPv4', s.get('entry_ip', ''))),
+                   entry_port=valid_port(port or prompt('WireGuard UDP port on Iran', str(s.get('entry_port', DEFAULT_WG_PORT)))))
+    pair = pairing_decode(s['pairing'])
+    pair.update(entry_ip=updated['entry_ip'], entry_port=updated['entry_port'])
+    updated['pairing'] = pairing_encode(pair)
+    config = WG/(LINK+'.conf')
+    old_config = config.read_text()
+    active = run(['systemctl', 'is-active', 'wg-quick@'+LINK], check=False).returncode == 0
+    try:
+        save(config, link_config(updated))
+        persist(updated)
+        if active: run(['systemctl', 'restart', 'wg-quick@'+LINK])
+    except (Exception, KeyboardInterrupt):
+        save(config, old_config)
+        persist(s)
+        if active: run(['systemctl', 'restart', 'wg-quick@'+LINK], check=False)
+        raise
+    print(f'Outside peer updated: {updated["entry_ip"]}:{updated["entry_port"]}; keepalive every 25 seconds.')
+    print('Keys and service ports retained. For a new Iran installation, copy this refreshed pairing code (SECRET):')
+    print(updated['pairing'])
+
+
 def menu():
     s = load()
     heading('Tunnel management', role_label(s)+' | '+mapping(s))
@@ -633,6 +686,8 @@ def menu():
     menu_option('7', 'Uninstall completely', 'Remove WG Bridge, its tunnel configuration and keys.', '31')
     if s['role'] == 'entry':
         menu_option('8', 'Change public forwarding port', 'The outside service port and tunnel keys stay the same.')
+    else:
+        menu_option('8', 'Set Iran peer endpoint', 'Enable two-way initiation; update Iran public IPv4 and WireGuard UDP port.')
     menu_option('0', 'Exit')
     print('\n  Open this menu anytime with '+styled('wg-bridge', '1;33')+'.\n')
     choice = prompt('  Select')
@@ -650,15 +705,20 @@ def menu():
         run(['systemctl', 'stop', 'wg-quick@'+LINK])
         print('Tunnel stopped. Run wg-bridge and choose Start to resume.')
     elif choice == '7': uninstall(s)
-    elif choice == '8': change_port(s)
+    elif choice == '8':
+        if s['role'] == 'entry': change_port(s)
+        else: change_peer(s)
     elif choice != '0': raise BridgeError('Unknown menu option.')
 
 
 def main():
     parser = argparse.ArgumentParser(description='WG Bridge: Server (Iran / entry) and Client (Outside / exit)')
-    parser.add_argument('command', nargs='?', default='menu', choices=['menu','install','status','doctor','uninstall','port','_network','version'])
+    parser.add_argument('command', nargs='?', default='menu', choices=['menu','install','status','doctor','uninstall','port','peer','_network','version'])
     parser.add_argument('argument', nargs='?')
+    parser.add_argument('peer_port', nargs='?')
     args = parser.parse_args()
+    if args.peer_port is not None and args.command != 'peer':
+        parser.error('A second argument is supported only by: peer IRAN_IP IRAN_WG_PORT')
     if args.command == 'version':
         print(VERSION)
         return
@@ -684,6 +744,7 @@ def main():
                 if not doctor(s): sys.exit(2)
             elif args.command == 'uninstall': uninstall(s)
             elif args.command == 'port': change_port(s, args.argument)
+            elif args.command == 'peer': change_peer(s, args.argument, args.peer_port)
 
 
 if __name__ == '__main__':

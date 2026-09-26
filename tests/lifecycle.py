@@ -41,10 +41,14 @@ def main():
     absent()
     before = {k: w.run(['sysctl', '-n', k]) for k in ['net.ipv4.ip_forward', 'net.ipv6.conf.all.forwarding', 'net.ipv4.conf.all.rp_filter']}
     try:
-        call(['script', '-q', '-e', '-c', 'bash install.sh', '/dev/null'], '2\n8.8.8.8\n51830\n8443\nboth\n')
+        call(['script', '-q', '-e', '-c', 'bash install.sh', '/dev/null'], '2\n8.8.8.8\n\n9.9.9.9\n51831\n8443\nboth\n')
         state = w.load()
         assert state['role'] == 'exit'
+        assert state['port'] == 9999
+        assert state['entry_ip'] == '9.9.9.9' and state['entry_port'] == 51831
         assert w.pairing_decode(state['pairing'])['server_ip'] == '8.8.8.8'
+        assert '9.9.9.9:51831' in call(['wg','show',w.LINK,'endpoints'])
+        assert call(['wg','show',w.LINK,'persistent-keepalive']).strip().endswith('25')
         for name in ['wg-bridge-network', 'wg-quick@wgb-exit']:
             call(['systemctl', 'is-active', name]); call(['systemctl', 'is-enabled', name])
         config = w.WG/(w.LINK+'.conf')
@@ -61,6 +65,29 @@ def main():
         assert hashlib.sha256(config.read_bytes()).digest() == digest
         assert (w.STATE/'state.json').read_bytes() == state_bytes
         assert call(['/usr/local/sbin/wg-bridge', 'version']).strip() == w.VERSION
+        call(['/usr/local/sbin/wg-bridge', 'peer', '1.1.1.1', '32123'])
+        changed=w.load()
+        assert changed['link_private']==state['link_private'] and changed['target_port']==state['target_port']
+        assert '1.1.1.1:32123' in call(['wg','show',w.LINK,'endpoints'])
+        assert w.pairing_decode(changed['pairing'])['entry_port']==32123
+        call(['/usr/local/sbin/wg-bridge', 'peer', '9.9.9.9', '51831'])
+        assert (w.STATE/'state.json').read_bytes() == state_bytes
+        assert hashlib.sha256(config.read_bytes()).digest() == digest
+        real_run=w.run
+        failed_once=False
+        def fail_restart(args, *a, **kw):
+            nonlocal failed_once
+            if args == ['systemctl','restart','wg-quick@'+w.LINK] and not failed_once:
+                failed_once=True
+                raise w.BridgeError('injected peer restart failure')
+            return real_run(args,*a,**kw)
+        with patch.object(w,'run',side_effect=fail_restart), contextlib.redirect_stdout(io.StringIO()):
+            try: w.change_peer(state,'1.1.1.1','32123')
+            except w.BridgeError: pass
+            else: raise AssertionError('Expected peer rollback failure')
+        assert (w.STATE/'state.json').read_bytes() == state_bytes
+        assert hashlib.sha256(config.read_bytes()).digest() == digest
+        assert '9.9.9.9:51831' in call(['wg','show',w.LINK,'endpoints'])
         # Legacy upgrades must fail before replacing the installed program/state.
         manager_bytes = w.APP.read_bytes()
         legacy = dict(state)
@@ -83,7 +110,7 @@ def main():
         def fail_services(state):
             real_services(state)
             raise w.BridgeError('injected service failure')
-        with patch.object(w, 'prompt', side_effect=['2', '8.8.8.8', '51830', '8443', 'both']), patch.object(w, 'detect_ip', return_value=''), patch.object(w, 'services', side_effect=fail_services), contextlib.redirect_stdout(io.StringIO()):
+        with patch.object(w, 'prompt', side_effect=['2', '8.8.8.8', '51830', '9.9.9.9', '51831', '8443', 'both']), patch.object(w, 'detect_ip', return_value=''), patch.object(w, 'services', side_effect=fail_services), contextlib.redirect_stdout(io.StringIO()):
             try: w.install()
             except w.BridgeError as exc: assert str(exc) == 'injected service failure'
             else: raise AssertionError('Expected failure did not occur')
@@ -106,7 +133,8 @@ def main():
             w.uninstall(w.load(), confirm=False, purge=False)
         absent()
         assert all(w.run(['sysctl', '-n', k]) == v for k, v in before.items())
-        call(['script', '-q', '-e', '-c', 'bash install.sh', '/dev/null'], '2\n8.8.8.8\n51830\n8443\nboth\n')
+        call(['script', '-q', '-e', '-c', 'bash install.sh', '/dev/null'], '2\n8.8.8.8\n\n9.9.9.9\n\n8443\nboth\n')
+        assert w.load()['port']==9999 and w.load()['entry_port']==9999
         call(['script', '-q', '-e', '-c', 'bash install.sh --uninstall', '/dev/null'], 'REMOVE\n')
         absent()
         assert not w.APP.exists() and not w.LAUNCHER.exists()

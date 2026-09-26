@@ -202,19 +202,30 @@ while True:
     client_private, client_public = w.keypair()
     psk = w.run(['wg', 'genpsk'])
     states = {
-        'out': dict(mode=w.MODE, role='exit', wan='wan0', port=51830, target_port=9443, protocol='both',
-                    public_ip='198.51.100.2', link_private=server_private, peer_public=client_public, psk=psk),
+        'out': dict(mode=w.MODE, role='exit', wan='wan0', port=w.DEFAULT_WG_PORT, target_port=9443, protocol='both',
+                    public_ip='198.51.100.2', link_private=server_private, peer_public=client_public, psk=psk,
+                    entry_ip='192.0.2.2', entry_port=51831),
         'ir': dict(mode=w.MODE, role='entry', wan='wan0', port=51831, listen_port=8443, target_port=9443, protocol='both',
                    public_ip='192.0.2.2', link_private=client_private, peer_public=server_public, psk=psk,
-                   exit_ip='198.51.100.2', exit_port=51830)
+                   exit_ip='198.51.100.2', exit_port=w.DEFAULT_WG_PORT)
     }
-    for name, state in states.items():
+    for name in ('ir', 'out'):
+        state = states[name]
         w.save(folder/name/'state.json', json.dumps(state))
-        w.save(folder/name/'wgb-exit.conf', w.link_config(state))
+        config = w.link_config(state)
+        if name == 'ir':
+            # Prove Outside can initiate even before Iran knows an endpoint.
+            config = '\n'.join(line for line in config.splitlines() if not line.startswith('Endpoint ='))+'\n'
+            config = config.replace('PersistentKeepalive = 25', 'PersistentKeepalive = 0')
+        w.save(folder/name/'wgb-exit.conf', config)
         apply(name, folder, True)
         ns(name, 'wg-quick', 'up', folder/name/'wgb-exit.conf')
     time.sleep(0.5)
     assert fetch('wan', 'http://192.0.2.2:8443') == w.ENTRY_IP
+    assert int(ns('out', 'wg', 'show', w.LINK, 'latest-handshakes').stdout.split()[1]) > 0
+    w.save(folder/'ir'/'wgb-exit.conf', w.link_config(states['ir']))
+    ns('ir', 'wg', 'set', w.LINK, 'peer', server_public, 'endpoint', '198.51.100.2:'+str(w.DEFAULT_WG_PORT), 'persistent-keepalive', '25')
+    print('PASS: Outside independently initiates the WireGuard link on the default UDP transport port', flush=True)
     udp(8443)
     # No local OUTPUT redirection, and no access to other outside service ports.
     fetch('ir', 'http://192.0.2.2:8443', ok=False)
