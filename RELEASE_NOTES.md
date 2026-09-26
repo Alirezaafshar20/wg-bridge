@@ -1,22 +1,21 @@
-# WG Bridge v0.2.0
+# WG Bridge v0.2.1
 
-- **Server (Iran)** is the ingress and panel host; **Client (Outside)** provides Internet egress.
-- New installations use explicit `entry`/`exit` state. Existing v0.1 roles and pairing codes remain compatible; the transport direction and routing are preserved.
-- `install.sh --upgrade` updates the manager without replacing keys or restarting the tunnel.
-- Full uninstall removes owned network configuration, keys, services, manager and launcher. Use the menu, `wg-bridge uninstall` or `install.sh --uninstall`.
-- English and Persian documentation now use separate Requirements and Install commands with operational details in dedicated sections.
+- Support Ubuntu 26.04 LTS, including Ubuntu 26.04.1, alongside existing supported distributions.
+- Add Ubuntu 26.04 to network and complete installer lifecycle CI.
+- Refresh installation and management menus with clearer options, terminal-aware colors and creator links for **alirezaw** ([GitHub](https://github.com/Alirezaafshar20), [YouTube](https://www.youtube.com/@ialirezaw)).
+- Simplify installation and upgrades to `bash <(curl -fsSL ...)` in the English and Persian guides. The manager remains pinned to a release and verified by SHA-256.
 
-Validation includes real WireGuard network tests and Ubuntu 22.04/24.04 installer lifecycle tests, including legacy upgrade, removal cancellation, rollback and full uninstall. This remains a preview release; correctness tests do not establish production throughput or user capacity.
+The v0.2.0 tag remains unchanged. Use the current installation command in the documentation to install this fix. Existing deployments can use the same command with `--upgrade`.
 
-[English documentation](https://github.com/Alirezaafshar20/wg-bridge#readme) · [فارسی](https://github.com/Alirezaafshar20/wg-bridge/blob/main/README.fa.md) · [Changelog](https://github.com/Alirezaafshar20/wg-bridge/blob/main/CHANGELOG.md)
+[English documentation](https://github.com/Alirezaafshar20/wg-bridge#readme) · [فارسی](https://github.com/Alirezaafshar20/wg-bridge/blob/main/README.fa.md)
 
 <details>
 <summary>توضیحات فارسی</summary>
 
-در نسخهٔ 0.2، ایران با نقش Server و خارج با نقش Client نمایش داده می‌شوند. مسیر ترافیک و جهت آغاز ارتباط WireGuard حفظ شده‌اند و تنظیمات نسخهٔ قبلی همچنان سازگارند.
+پشتیبانی Ubuntu 26.04 LTS، شامل 26.04.1، اضافه شد و این نسخه در آزمون‌های شبکه، نصب، ارتقا و حذف قرار گرفت. دستور نصب و ارتقا در هر دو راهنما به قالب `bash <(curl -fsSL ...)` تغییر کرد. فایل مدیر همچنان از نسخهٔ مشخص دانلود و با SHA-256 بررسی می‌شود.
 
-ارتقای مدیر بدون تعویض کلیدها یا راه‌اندازی مجدد تانل انجام می‌شود. حذف کامل از منو، فرمان `wg-bridge uninstall` و گزینهٔ `--uninstall` نصب‌کننده در دسترس است. راهنماهای فارسی و انگلیسی بازنویسی شده‌اند و Requirements و Install دستورهای جدا دارند.
+نسخهٔ 0.2.0 تغییر نکرده است؛ برای دریافت اصلاح از دستور جدید در راهنما استفاده کنید. برای ارتقای نصب موجود، گزینهٔ `--upgrade` را به همان دستور اضافه کنید.
 
-تست‌های شبکه و نصب روی Ubuntu 22.04 و 24.04 شامل سازگاری نسخهٔ قبلی، لغو حذف، بازگردانی نصب ناموفق و حذف کامل هستند. این انتشار همچنان آزمایشی است؛ آزمون درستی عملکرد، ظرفیت مصرف واقعی را تضمین نمی‌کند.
+منوهای نصب و مدیریت با رنگ‌بندی، توضیحات روشن‌تر و نام سازندهٔ **alirezaw** به‌روز شدند. لینک گیت‌هاب و کانال یوتیوب **@ialirezaw** در منوها قرار دارد.
 
 </details>

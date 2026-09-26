@@ -12,7 +12,7 @@ Users → Server (Iran / ingress) ⇄ WireGuard ⇄ Client (Outside / egress) �
 
 ## Requirements
 
-Ubuntu 22.04/24.04 یا Debian 12/13، دسترسی root، systemd، کرنل دارای WireGuard و IPv6 فعال، و IPv4 عمومی روی هر دو میزبان. UDP خروجی ایران به خارج و UDP ورودی پورت تانل روی خارج باید مجاز باشد؛ پورت پیش‌فرض خارج `51830` است. سایر وابستگی‌ها را نصب‌کننده از مخازن سیستم‌عامل نصب می‌کند.
+Ubuntu 22.04/24.04/26.04 LTS (شامل 26.04.1) یا Debian 12/13، دسترسی root، systemd، کرنل دارای WireGuard و IPv6 فعال، و IPv4 عمومی روی هر دو میزبان. UDP خروجی ایران به خارج و UDP ورودی پورت تانل روی خارج باید مجاز باشد؛ پورت پیش‌فرض خارج `51830` است. سایر وابستگی‌ها را نصب‌کننده از مخازن سیستم‌عامل نصب می‌کند.
 
 ```bash
 apt-get update && apt-get install -y curl ca-certificates
@@ -21,7 +21,7 @@ apt-get update && apt-get install -y curl ca-certificates
 ## Install
 
 ```bash
-curl --proto '=https' --tlsv1.2 -fsSL --retry 2 https://raw.githubusercontent.com/Alirezaafshar20/wg-bridge/v0.2.0/install.sh -o /root/wg-bridge-install.sh && bash /root/wg-bridge-install.sh
+bash <(curl -fsSL https://raw.githubusercontent.com/Alirezaafshar20/wg-bridge/main/install.sh)
 ```
 
 ## پیکربندی
@@ -44,7 +44,7 @@ wg-bridge doctor
 ## ارتقا
 
 ```bash
-curl --proto '=https' --tlsv1.2 -fsSL --retry 2 https://raw.githubusercontent.com/Alirezaafshar20/wg-bridge/v0.2.0/install.sh -o /root/wg-bridge-install.sh && bash /root/wg-bridge-install.sh --upgrade
+bash <(curl -fsSL https://raw.githubusercontent.com/Alirezaafshar20/wg-bridge/main/install.sh) --upgrade
 ```
 
 مدیر تانل به‌روز می‌شود و کلیدها، پیکربندی WireGuard و اتصال‌های فعال حفظ می‌شوند. نام نقش‌های نسخهٔ 0.1 به همان کارکرد ورودی و خروجی قبلی نگاشت می‌شود.
@@ -55,7 +55,7 @@ curl --proto '=https' --tlsv1.2 -fsSL --retry 2 https://raw.githubusercontent.co
 wg-bridge uninstall
 ```
 
-با `REMOVE` تأیید کنید. حذف از منو یا با `bash /root/wg-bridge-install.sh --uninstall` هم در دسترس است. تانل، کلیدها، قوانین فایروال و مسیریابی متعلق به ابزار، تنظیمات systemd، مدیر و فرمان اجرایی حذف می‌شوند. تنظیمات ثبت‌شدهٔ شبکه در صورت باقی‌بودن مقادیر تحت مدیریت ابزار بازگردانی می‌شوند؛ بسته‌های مشترک سیستم‌عامل باقی می‌مانند.
+با `REMOVE` تأیید کنید. حذف از منو یا با گزینهٔ `--uninstall` نصب‌کننده هم در دسترس است. تانل، کلیدها، قوانین فایروال و مسیریابی متعلق به ابزار، تنظیمات systemd، مدیر و فرمان اجرایی حذف می‌شوند. تنظیمات ثبت‌شدهٔ شبکه در صورت باقی‌بودن مقادیر تحت مدیریت ابزار بازگردانی می‌شوند؛ بسته‌های مشترک سیستم‌عامل باقی می‌مانند.
 
 ## نگهداری
 
@@ -66,5 +66,7 @@ journalctl -u wg-bridge-network -u wg-quick@wgb-exit --no-pager -n 60
 MTU پیش‌فرض `1380` است. خروج IPv6 در صورت پشتیبانی خارج با NAT66 انجام می‌شود؛ در غیر این صورت ترافیک اینترنتی IPv6 مشمول تانل مسدود می‌شود. VPN دارای policy routing و firewalld فعال پذیرفته نمی‌شوند. nftables سفارشی، TProxy، چند WAN و DNAT ورودی نیازمند تنظیم مستقل‌اند. WireGuard به مسیر UDP سالم نیاز دارد و استتار پروتکل انجام نمی‌دهد.
 
 [طراحی شبکه و مسیرهای مستثنا](docs/network.md) · [توسعه و آزمون](CONTRIBUTING.md) · [تغییرات نسخه‌ها](CHANGELOG.md) · [طرح ویدیوی فارسی](docs/video-fa.md)
+
+ساخته‌شده توسط **alirezaw** · [گیت‌هاب](https://github.com/Alirezaafshar20) · [یوتیوب @ialirezaw](https://www.youtube.com/@ialirezaw)
 
 مجوز [MIT](LICENSE)

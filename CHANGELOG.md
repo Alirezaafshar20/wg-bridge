@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1 — 2026-09-26
+
+- Accept Ubuntu 26.04 LTS, including 26.04.1. Ubuntu point releases retain `VERSION_ID=26.04` in `/etc/os-release`.
+- Add Ubuntu 26.04 to real network and installer lifecycle CI.
+- Refresh installation and management menus with terminal-aware colors, clearer role descriptions and alirezaw's GitHub/YouTube links.
+- Use `bash <(curl -fsSL ...)` for installation and upgrades in both language guides. The bootstrap downloads a version-pinned, checksum-verified manager.
+
 ## 0.2.0 — 2026-09-26
 
 - Deployment roles: **Server (Iran / entry)** and **Client (Outside / exit)**. WireGuard initiation and the traffic path are preserved.

@@ -12,7 +12,7 @@ Users → Server (Iran / ingress) ⇄ WireGuard ⇄ Client (Outside / egress) �
 
 ## Requirements
 
-Ubuntu 22.04/24.04 or Debian 12/13; root access; systemd; a WireGuard-capable kernel with IPv6 enabled; public IPv4 on both hosts. Permit outbound UDP from Iran to the outside endpoint and inbound UDP on the outside tunnel port (default `51830`). The installer provisions the remaining distribution packages.
+Ubuntu 22.04/24.04/26.04 LTS (26.04.1 included) or Debian 12/13; root access; systemd; a WireGuard-capable kernel with IPv6 enabled; public IPv4 on both hosts. Permit outbound UDP from Iran to the outside endpoint and inbound UDP on the outside tunnel port (default `51830`). The installer provisions the remaining distribution packages.
 
 ```bash
 apt-get update && apt-get install -y curl ca-certificates
@@ -21,7 +21,7 @@ apt-get update && apt-get install -y curl ca-certificates
 ## Install
 
 ```bash
-curl --proto '=https' --tlsv1.2 -fsSL --retry 2 https://raw.githubusercontent.com/Alirezaafshar20/wg-bridge/v0.2.0/install.sh -o /root/wg-bridge-install.sh && bash /root/wg-bridge-install.sh
+bash <(curl -fsSL https://raw.githubusercontent.com/Alirezaafshar20/wg-bridge/main/install.sh)
 ```
 
 ## Configuration
@@ -44,7 +44,7 @@ The menu provides status, diagnostics, restart, pairing, stop, start and complet
 ## Upgrade
 
 ```bash
-curl --proto '=https' --tlsv1.2 -fsSL --retry 2 https://raw.githubusercontent.com/Alirezaafshar20/wg-bridge/v0.2.0/install.sh -o /root/wg-bridge-install.sh && bash /root/wg-bridge-install.sh --upgrade
+bash <(curl -fsSL https://raw.githubusercontent.com/Alirezaafshar20/wg-bridge/main/install.sh) --upgrade
 ```
 
 Updates the manager while retaining keys, WireGuard configuration and running connections. Legacy v0.1 role names are mapped to their existing ingress/egress function.
@@ -55,7 +55,7 @@ Updates the manager while retaining keys, WireGuard configuration and running co
 wg-bridge uninstall
 ```
 
-Confirm with `REMOVE`. Removal is also available in the menu or through `bash /root/wg-bridge-install.sh --uninstall`. It removes the tunnel, keys, owned firewall/routing rules, systemd configuration, manager and launcher; recorded network settings are restored where still owned. Shared distribution packages remain installed.
+Confirm with `REMOVE`. Removal is also available in the menu or through the installer’s `--uninstall` option. It removes the tunnel, keys, owned firewall/routing rules, systemd configuration, manager and launcher; recorded network settings are restored where still owned. Shared distribution packages remain installed.
 
 ## Operations
 
@@ -66,5 +66,7 @@ journalctl -u wg-bridge-network -u wg-quick@wgb-exit --no-pager -n 60
 Default MTU: `1380`. IPv6 egress uses NAT66 when available; otherwise affected IPv6 Internet traffic is blocked. Existing policy-routing VPNs and active firewalld are rejected. Custom nftables, TProxy, multi-WAN and inbound DNAT require separate integration. WireGuard requires a working UDP path and does not provide protocol obfuscation.
 
 [Network design and routing exceptions](docs/network.md) · [Development and validation](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Persian video outline](docs/video-fa.md)
+
+Created by **alirezaw** · [GitHub](https://github.com/Alirezaafshar20) · [YouTube @ialirezaw](https://www.youtube.com/@ialirezaw)
 
 [MIT License](LICENSE)

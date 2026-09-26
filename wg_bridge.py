@@ -17,7 +17,10 @@ import sys
 import tempfile
 import time
 
-VERSION = '0.2.0'
+VERSION = '0.2.1'
+AUTHOR = 'alirezaw'
+GITHUB_URL = 'https://github.com/Alirezaafshar20'
+YOUTUBE_URL = 'https://www.youtube.com/@ialirezaw'
 STATE = Path('/etc/wg-bridge')
 WG = Path('/etc/wireguard')
 APP = Path('/usr/local/lib/wg-bridge/wg_bridge.py')
@@ -165,6 +168,36 @@ def keypair():
 def prompt(label, default=''):
     suffix = f' [{default}]' if default else ''
     return input(label+suffix+': ').strip() or default
+
+
+def styled(text, color='36'):
+    if sys.stdout.isatty() and os.environ.get('TERM', '') not in ('', 'dumb') and 'NO_COLOR' not in os.environ:
+        return '\033['+color+'m'+text+'\033[0m'
+    return text
+
+
+def heading(section, subtitle=''):
+    width = max(24, min(72, shutil.get_terminal_size((76, 24)).columns-4))
+    rule = '  '+'-'*width
+    print('\n'+styled(rule))
+    print(styled('  WG BRIDGE', '1;36')+'  /  v'+VERSION)
+    print('  Server-to-server WireGuard tunnel')
+    print(styled(rule))
+    print('  Built by '+AUTHOR)
+    print('  GitHub   '+GITHUB_URL)
+    if YOUTUBE_URL:
+        print('  YouTube  '+YOUTUBE_URL)
+    print(styled(rule))
+    print('\n  '+styled(section.upper(), '1'))
+    if subtitle:
+        print('  '+subtitle)
+    print()
+
+
+def menu_option(number, label, detail='', color='36'):
+    print('  '+styled('['+number+']', color)+'  '+label)
+    if detail:
+        print('       '+detail)
 
 
 def detect_ip():
@@ -383,8 +416,16 @@ def install():
         return menu()
     if STATE.exists() and any(STATE.iterdir()):
         raise BridgeError('/etc/wg-bridge contains an incomplete install. Inspect it before retrying.')
-    print('\nWG Bridge '+VERSION+'\n1) Server (Iran / entry)\n2) Client (Outside / exit)')
-    role = prompt('Select [1/2]')
+    heading('Installation', 'Set up Client (Outside) first, then Server (Iran).')
+    menu_option('1', 'Server (Iran / entry)', 'Hosts your panel; sends outbound traffic through the tunnel.')
+    print()
+    menu_option('2', 'Client (Outside / exit)', 'Provides Internet access; generates the pairing code.')
+    print()
+    menu_option('0', 'Exit')
+    print()
+    role = prompt('  Select [1/2/0]')
+    if role == '0':
+        return
     if role not in ['1', '2']:
         raise BridgeError('Choose 1 or 2.')
     s = {'version': VERSION, 'role': 'entry' if role == '1' else 'exit'}
@@ -532,9 +573,19 @@ def remove_program():
 
 def menu():
     s = load()
-    print('\nWG Bridge '+VERSION+' | '+role_label(s))
-    print('\n1) Status\n2) Diagnose\n3) Restart tunnel\n4) Pairing code (Client / Outside)\n5) Stop tunnel (Internet blocked; inbound SSH preserved)\n6) Start tunnel\n7) Uninstall completely\n0) Exit')
-    choice = prompt('Select')
+    heading('Tunnel management', role_label(s))
+    menu_option('1', 'Status')
+    menu_option('2', 'Diagnose connectivity')
+    print()
+    menu_option('3', 'Restart tunnel')
+    menu_option('4', 'Show pairing code', 'Available on Client (Outside); keep this code private.')
+    menu_option('5', 'Stop tunnel', 'Outbound Internet is blocked; inbound SSH remains available.')
+    menu_option('6', 'Start tunnel')
+    print()
+    menu_option('7', 'Uninstall completely', 'Remove WG Bridge, its tunnel configuration and keys.', '31')
+    menu_option('0', 'Exit')
+    print()
+    choice = prompt('  Select [0-7]')
     if choice == '1': status(s)
     elif choice == '2': doctor(s)
     elif choice in ['3', '6']:

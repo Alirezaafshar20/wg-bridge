@@ -7,13 +7,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-24.04]
+        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-26.04]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - name: Dependencies
         run: |
+          cat /etc/os-release
           sudo apt-get update
           sudo apt-get install -y wireguard-tools iproute2 iptables conntrack iputils-ping curl kmod procps shellcheck
           sudo modprobe wireguard
