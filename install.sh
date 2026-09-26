@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 REPO="Alirezaafshar20/wg-bridge"
 REF="v0.1.0"
-CORE_SHA256="f6a07c11ff91b81f70f4d91ce951b7f1ddb43d14873a85380811766725dbd0ae"
+CORE_SHA256="9177418a36b0b8128290e2d6f32c50f12346b0da41516e66782c59a1721ffbc3"
 APP_DIR="/usr/local/lib/wg-bridge"
 
 if [[ "${1:-}" == "--help" ]]; then

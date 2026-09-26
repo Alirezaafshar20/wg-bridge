@@ -37,7 +37,7 @@ class CoreTests(unittest.TestCase):
     def test_port_and_public_address(self):
         for value in [0, 65536, -1, True, 1.2, '2;reboot', None]:
             with self.assertRaises(w.BridgeError): w.valid_port(value)
-        for value in ['127.0.0.1', '10.0.0.1', '::1', '8.8.8.8:9', 1234, None]:
+        for value in ['127.0.0.1', '10.0.0.1', '224.0.0.1', '::1', '8.8.8.8:9', 1234, None]:
             with self.assertRaises(w.BridgeError): w.valid_ip(value)
         self.assertEqual(w.valid_port('65535'), 65535)
 

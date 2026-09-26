@@ -108,7 +108,7 @@ def valid_ip(value):
         addr = ipaddress.IPv4Address(value)
     except (ValueError, TypeError):
         raise BridgeError('Enter a public IPv4 address, without a port.') from None
-    if not addr.is_global:
+    if not addr.is_global or addr.is_multicast:
         raise BridgeError('A public IPv4 address is required.')
     return str(addr)
 

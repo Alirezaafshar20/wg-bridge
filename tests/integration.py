@@ -75,7 +75,12 @@ def fetch(name, url, source=None, ok=True):
     args = ['curl', '--noproxy', '*', '-fsS', '--connect-timeout', '2', '--max-time', '4']
     if source: args += ['--interface', source]
     p = ns(name, *args, url, check=False)
-    if ok and p.returncode: raise AssertionError('Cannot reach '+url+' from '+name+': '+p.stderr)
+    if ok and p.returncode:
+        if '8082' in url:
+            for target in ['ir', 'wan']:
+                for args in [('ip6tables-save', '-c'), ('ip', '-6', 'rule'), ('ip', '-6', 'neigh'), ('conntrack', '-L', '-f', 'ipv6')]:
+                    print(target, args, ns(target, *args, check=False).stdout, flush=True)
+        raise AssertionError('Cannot reach '+url+' from '+name+': '+p.stderr)
     if not ok: assert p.returncode != 0, 'Traffic leaked while tunnel was down'
     return p.stdout.strip()
 
@@ -88,6 +93,8 @@ def apply(name, folder, up):
 
 
 def test(folder):
+    print(command(['uname', '-r']).stdout.strip(), command(['iptables', '--version']).stdout.strip(),
+          command(['ip6tables', '--version']).stdout.strip(), flush=True)
     for name in NAMES:
         command(['ip', 'netns', 'add', NAMES[name]])
         ns(name, 'ip', 'link', 'set', 'lo', 'up')
