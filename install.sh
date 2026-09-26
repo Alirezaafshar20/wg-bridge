@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 REPO="itsalirezaw/wg-bridge"
 REF="v0.3.0"
-CORE_SHA256="0b0fb4e53cd3773f3144e764803aa27ab7d44965e290baa28ac0726d5141e146"
+CORE_SHA256="0dd2de82f5fcf641c1592dad9ec2eb65401c561a98ca6911cb0fddb58a9f8958"
 APP_DIR="/usr/local/lib/wg-bridge"
 MODE="${1:-install}"
 

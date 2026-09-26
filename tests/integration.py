@@ -267,6 +267,8 @@ while True:
         ns(name, 'iptables', '-C', 'INPUT', '-j', 'UNRELATED')
         assert '-P FORWARD DROP' in ns(name, 'iptables', '-S').stdout
         assert 'WGB_' not in ns(name, 'iptables-save').stdout
+    for proto in ['tcp', 'udp']:
+        assert not ns('ir', 'conntrack', '-L', '-p', proto, '--dst-nat', '--reply-src', w.EXIT_IP).stdout.strip()
     direct_services()
     print('PASS: complete rule cleanup preserves unrelated firewall and routing', flush=True)
 

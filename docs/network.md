@@ -22,7 +22,7 @@ There is no `OUTPUT` redirect: Iran-local requests and downloads retain their no
 
 When the peer is unreachable, only the selected mapping times out. If the local WG interface disappears, a mapping-specific reject rule prevents DNAT packets from escaping through the WAN default route. Stopping WireGuard leaves these rules active. Other traffic does not depend on tunnel availability.
 
-The network service precedes `wg-quick@wgb-exit`. Rules use scoped `WGB_IN`, `WGB_FWD`, `WGB_DNAT`, `WGB_NAT`, `WGB_MSS` chains. DNAT is attached after forwarding guards and removed first during cleanup. No existing global chain is flushed. Uninstall removes owned files, rules, interface, units and keys, retaining shared packages. Interrupted setup rolls back owned network changes.
+The network service precedes `wg-quick@wgb-exit`. Rules use scoped `WGB_IN`, `WGB_FWD`, `WGB_DNAT`, `WGB_NAT`, `WGB_MSS` chains. DNAT is attached after forwarding guards and removed first during cleanup. Before removing the fallback guard, cleanup deletes only conntrack entries matching the old protocol/public port and private reply tuple; it never flushes the shared connection table. No existing global chain is flushed. Uninstall removes owned files, rules, interface, units and keys, retaining shared packages. Interrupted setup rolls back owned network changes.
 
 Changing Iran's public port validates availability before changing rules, preserves keys and the target port, and restores the old mapping on failure. Active forwarded connections can be interrupted. The protocol and outside target remain fixed for the pair; changing them requires reinstalling/re-pairing both hosts.
 

@@ -362,6 +362,16 @@ def network(s, up):
         for table, parent, chain in sorted(CHAINS, key=lambda x: x[2] != 'WGB_DNAT'):
             while run(['iptables', '-w', '-t', table, '-C', parent, '-j', chain], check=False).returncode == 0:
                 run(['iptables', '-w', '-t', table, '-D', parent, '-j', chain])
+            if chain == 'WGB_DNAT' and s['role'] == 'entry':
+                # NAT survives rule deletion in conntrack. Remove only this
+                # mapping's flows before detaching its WAN fallback guard.
+                for proto in protocols(s):
+                    match = ['-f', 'ipv4', '-p', proto, '--dport', str(s['listen_port']),
+                             '--reply-src', EXIT_IP, '--reply-dst', ENTRY_IP,
+                             '--reply-port-src', str(s['target_port']), '--dst-nat']
+                    run(['conntrack', '-D']+match, check=False)
+                    if run(['conntrack', '-L']+match):
+                        raise BridgeError('Could not clear the forwarded connections; retaining the network guards.')
             run(['iptables', '-w', '-t', table, '-F', chain], check=False)
             run(['iptables', '-w', '-t', table, '-X', chain], check=False)
 
@@ -401,7 +411,7 @@ def preflight():
         raise BridgeError('A systemd VPS/VM is required; ordinary Docker/OpenVZ containers are not supported.')
     if run(['systemctl', 'is-active', 'firewalld'], check=False).returncode == 0:
         raise BridgeError('firewalld is active. This release supports iptables/UFW hosts, not firewalld.')
-    for cmd in ['wg', 'wg-quick', 'ip', 'iptables', 'sysctl', 'curl']:
+    for cmd in ['wg', 'wg-quick', 'ip', 'iptables', 'sysctl', 'conntrack', 'curl']:
         if shutil.which(cmd) is None:
             raise BridgeError('Missing dependency: '+cmd+'. Re-run install.sh.')
     run(['modprobe', 'wireguard'])
