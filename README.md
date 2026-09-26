@@ -1,101 +1,75 @@
 # WG Bridge
 
-تانل سادهٔ **WireGuard بین دو سرور**: ایران به خارج. بدون پنل، بدون ساخت کانفیگ برای کاربران و بدون نیاز به واردکردن رمز SSH در اسکریپت.
+**English** | [فارسی](README.fa.md)
 
-[English](README.en.md) · [راهنمای ویدیو](docs/video-fa.md) · [جزئیات شبکه و محدودیت‌ها](docs/network.md)
+A small WireGuard **server-to-server** tunnel. Run the same installer on an outside exit (1: Server) and an Iran entry (2: Client). Existing proxy-panel users connect to the entry as before; new Internet connections from the entry leave through the exit. No end-user profiles, panel, account database or subscription management.
+
+[Network details](docs/network.md) · [Video guide (Persian)](docs/video-fa.md)
 
 ```text
-کاربران ←→ پنل / Xray روی ایران ←→ WireGuard ←→ سرور خارج ←→ اینترنت
+Users <-> Panel / Xray on Iran entry <-> WireGuard <-> Outside exit <-> Internet
 ```
 
-فقط **یک Peer برای سرور مقابل** ساخته می‌شود. صدها کاربر پنل می‌توانند از همان ارتباط عبور کنند؛ هر کاربر WireGuard جداگانه نمی‌خواهد. ظرفیت واقعی تابع پهنای باند، CPU، کیفیت مسیر، تعداد اتصال‌ها و محدودیت‌های میزبان است. تعداد کاربر به‌تنهایی معیار ظرفیت نیست و این پروژه عدد تضمینی برای سرعت یا تعداد کاربران اعلام نمی‌کند.
+## Install
 
-## پیش‌نیاز
+Root access, a systemd VPS, a WireGuard-capable kernel, enabled kernel IPv6, and public IPv4 on both hosts are required. Installer targets Ubuntu 22.04/24.04 and Debian 12/13. Permit UDP 51830 (or your chosen port) in the outside provider's firewall. IPv6 Internet on the outside is optional.
 
-- دو VPS با دسترسی root و IPv4 عمومی، Ubuntu **22.04 یا 24.04** یا Debian **12 یا 13**، همراه systemd و پشتیبانی WireGuard در کرنل.
-- دسترسی UDP از ایران به سرور خارج؛ پورت پیش‌فرض خارج `51830` است. این پورت را در فایروال پنل شرکت میزبان هم باز کنید.
-- روی ایران، VPN دیگری که policy routing را عوض کرده فعال نباشد. اسکریپت در صورت تداخل متوقف می‌شود.
-- برای اولین نصب، یک نشست SSH باز نگه دارید و کنسول تحت وب شرکت میزبان را در دسترس داشته باشید.
-
-این پروژه WireGuard معمولی است و استتار ترافیک ندارد. اگر مسیر ایران به خارج UDP یا WireGuard را مسدود کند، نصب موفق به‌تنهایی باعث برقراری ارتباط نمی‌شود. شیوهٔ انتخاب Server / Client از تجربهٔ سادهٔ نصب [paqet](https://github.com/LivingG0D/paqet) الهام گرفته؛ پروتکل و پیاده‌سازی مستقل است.
-
-## نصب — همان دستور روی هر دو سرور
-
-با root وارد شوید؛ در صورت نیاز ابتدا `sudo -i` بزنید. دستور زیر ابزار دانلود را هم نصب می‌کند. بقیهٔ پیش‌نیازها را خود اسکریپت از مخازن رسمی سیستم‌عامل نصب می‌کند.
+Run on **outside first**, then **Iran**, as root:
 
 ```bash
 apt-get update && apt-get install -y curl ca-certificates && curl --proto '=https' --tlsv1.2 -fSL https://raw.githubusercontent.com/Alirezaafshar20/wg-bridge/v0.1.0/install.sh -o /root/wg-bridge-install.sh && bash /root/wg-bridge-install.sh
 ```
 
-### ۱. ابتدا سرور خارج
+Dependencies come from official distribution repositories. The manager download is version-pinned and SHA-256 checked; this verifies consistency, not a detached publisher signature.
 
-1. دستور نصب را اجرا کنید و **`1) Server`** را انتخاب کنید.
-2. IPv4 عمومی پیشنهادی را بررسی و تأیید کنید.
-3. پورت UDP را انتخاب کنید؛ معمولاً همان `51830` کافی است.
-4. اسکریپت یک **کد اتصال محرمانه** نمایش می‌دهد. آن را برای مرحلهٔ بعد کپی کنید.
+### 1. Outside server first
 
-### ۲. سپس سرور ایران
+1. Run the installer and select **`1) Server`**.
+2. Confirm the detected public IPv4 address.
+3. Choose the tunnel UDP port; the default is `51830`. Open that UDP port in your provider's firewall too.
+4. Copy the **secret pairing code** printed at the end.
 
-1. همان دستور را اجرا و **`2) Client`** را انتخاب کنید.
-2. کد سرور خارج را وارد کنید. هنگام واردکردن، چیزی روی صفحه نمایش داده نمی‌شود؛ این طبیعی است.
-3. IPv4 عمومی ایران را تأیید کنید و پورت محلی WireGuard را روی مقدار پیشنهادی `51831` بگذارید.
-4. برنامه handshake و IP خروجی را بررسی می‌کند. سپس با یک کاربر واقعی پنل، بازشدن سایت و IP خروجی را امتحان کنید.
-5. یک اتصال SSH جدید به ایران باز کنید؛ بعد نشست قبلی را ببندید.
+### 2. Iran server second
 
-کد اتصال شامل کلید خصوصی سمت ایران است؛ **رمزگذاری نشده و فقط برای انتقال امن بین همین دو سرور است**. آن را در ویدیو، Issue، چت عمومی یا تصویر منتشر نکنید. این نسخه برای یک جفت سرور است؛ همان کد را روی چند سرور ایران اجرا نکنید. نمایش دوبارهٔ کد از منوی سرور خارج ممکن است.
+1. Run the same installer and select **`2) Client`**.
+2. Paste the outside server's pairing code. Input is hidden; seeing no characters while pasting is normal.
+3. Confirm the Iran server's public IPv4 and local WireGuard UDP port (default `51831`).
+4. Check the handshake and outgoing-IP results, then test a real user through your existing panel.
+5. Open a new SSH session to the Iran server before closing the original one.
 
-## مدیریت
+The pairing code contains the entry private key and PSK. It is **not encrypted**. Keep it private, hide it in recordings, and use it for exactly one entry server. No SSH password is requested or exchanged. Use a fresh pair on two fresh hosts for a separate deployment.
 
-```bash
-sudo wg-bridge
-```
+Keep your initial SSH session open and test a **new** SSH connection and real proxy-panel traffic before closing it. Provider console access is useful for any routing change.
 
-منو: وضعیت، عیب‌یابی، راه‌اندازی مجدد، نمایش کد اتصال، توقف، شروع و حذف کامل تنظیمات تونل.
+## Operate
 
-```bash
-sudo wg-bridge status
-sudo wg-bridge doctor
-sudo wg-bridge uninstall
-```
+`sudo wg-bridge` opens status, diagnose, restart, pairing, stop, start and uninstall. The same installer opens the existing menu without regenerating keys or upgrading. Units start at boot.
 
-اجرای دوبارهٔ نصب، منوی نسخهٔ نصب‌شده را باز می‌کند؛ کلید جدید نمی‌سازد و نسخه را خودکار عوض نمی‌کند. سرویس بعد از راه‌اندازی مجدد سیستم فعال می‌شود. حذف نیازمند تایپ `REMOVE` است و مسیر عادی اینترنت ایران را برمی‌گرداند؛ بسته‌های مشترک سیستم حذف نمی‌شوند.
+`sudo wg-bridge doctor` tests active services, a recent client handshake and outgoing IP. `sudo wg-bridge uninstall` asks for `REMOVE`, removes owned settings and restores ordinary entry Internet access. Shared packages remain installed.
 
-**توقف با حذف فرق دارد:** توقف تونل، خروج اینترنتی مشمول تونل را مسدود نگه می‌دارد تا از IP ایران خارج نشود. پاسخ SSH و اتصال‌های ورودی و مسیرهای مستثنا همچنان برقرار می‌مانند. گزینهٔ Start دوباره تونل را فعال می‌کند.
+Stopping the tunnel retains a default route to a local discard interface in its routing table: affected Internet traffic cannot fall back to the entry WAN. Incoming management replies and documented exclusions still work. Start restores the tunnel. Uninstall removes the policy and this block deliberately.
 
-## پنل‌ها، مسیرها و IPv6
+## Scope and limits
 
-ترافیک اینترنتی جدیدِ برنامه‌های ایران و ترافیک عبوری از شبکه‌های پشت ایران از خارج خارج می‌شود. حساب‌ها، لینک‌های اشتراک و پورت‌های پنل فعلی تغییر نمی‌کنند. پاسخ اتصال‌های ورودی، IP سرور خارج، IP مدیر هنگام نصب و مسیرهای مشخص موجود در جدول اصلی از تونل مستثنا هستند. در حالت معمولِ Xray، پاسخ به کاربر از ایران و اتصال Xray به سایت مقصد از تونل عبور می‌کند.
+One peer carries many simultaneous IP flows. User count alone cannot establish capacity: bandwidth, CPU, packet rate, conntrack limits, MTU, loss and congestion matter. The project does not promise a user limit or throughput figure. Tests include 300 HTTP requests using 40 workers; these are correctness tests, not a production capacity benchmark.
 
-این ادعای سازگاری قطعی با همهٔ پنل‌ها و تنظیمات نیست: TProxy، چند کارت شبکه، فایروال سفارشی nftables، برنامه‌های دارای مسیر یا mark اختصاصی، و DNAT ورودی به سرویس یک ماشین دیگر نیازمند بررسی جداگانه‌اند. نسخهٔ اول firewalld فعال و policy routing موجود را نمی‌پذیرد. پس از reload کردن UFW یا فایروال، از منو Restart بزنید و دوباره تست کنید.
+Plain WireGuard uses UDP and does not hide its protocol. If UDP/WireGuard is filtered, the installer cannot make that route reachable. The simple Server/Client experience is inspired by [paqet](https://github.com/LivingG0D/paqet), with independent code and a different transport.
 
-اگر خارج مسیر پیش‌فرض IPv6 داشته باشد، IPv6 هم با NAT66 عبور داده می‌شود. وجود مسیر تضمین اتصال سالم نیست؛ `doctor` آن را جداگانه می‌آزماید. در نبود مسیر IPv6 خارج، خروج IPv6 اینترنتی ایران مسدود می‌شود. IPv6 مدیریتی ورودی و مسیرهای مستثنا همچنان حفظ می‌شوند. IPv6 در کرنل هر دو سرور باید فعال باشد.
+This is routed Layer 3 IP connectivity with encryption, not Ethernet bridging. Standard locally running proxy services are the intended entry use case. Existing policy-routing VPNs and active firewalld are rejected. Custom nftables, TProxy, explicit application marks/routes, multi-WAN and inbound DNAT to other machines require separate integration. Cloud firewalls cannot be changed by this script. See [all exclusions and persistence behavior](docs/network.md).
 
-WireGuard اینجا مانند GRE یک ارتباط **لایهٔ ۳ برای IP** می‌دهد، همراه رمزنگاری. این اسکریپت پل Ethernet یا انتقال broadcast لایهٔ ۲ ایجاد نمی‌کند.
+The first release should be evaluated with your own panel and traffic before broad deployment. Ubuntu/Debian support in the installer is distinct from performance validation on every provider.
 
-## عیب‌یابی
-
-- `NO HANDSHAKE`: کد اتصال، IP خارج، پورت UDP فایروال میزبان و کیفیت مسیر را بررسی کنید.
-- handshake برقرار ولی اینترنت قطع: خروج اینترنت خارج، NAT، فایروال و نتیجهٔ `doctor` را بررسی کنید.
-- بعضی سایت‌ها باز نمی‌شوند: تست IPv6 و MTU را بررسی کنید؛ MTU پیش‌فرض این نسخه `1380` است.
-- قطع پس از تغییر فایروال: Restart و سپس Diagnose را از منو اجرا کنید.
-- تداخل با VPN قبلی: اسکریپت عمداً متوقف می‌شود؛ تنظیمات قبلی را بدون شناخت حذف نکنید.
+## Diagnostics and development
 
 ```bash
 sudo journalctl -u wg-bridge-network -u wg-quick@wgb-exit --no-pager -n 60
-```
-
-فایل‌های `/etc/wg-bridge/state.json` و `/etc/wireguard/wgb-exit.conf` محرمانه‌اند. گزارش خطا را بدون کلیدها ارسال کنید. اسکریپت هیچ رمز SSH، توکن GitHub یا اطلاعات کاربران پنل را دریافت نمی‌کند. تشخیص IP و تست اینترنت با درخواست HTTPS به `api.ipify.org` و `api64.ipify.org` انجام می‌شود.
-
-## توسعه و تست
-
-```bash
 python3 -m unittest discover -s tests -v
 sudo python3 tests/integration.py
 bash install.sh --check
 ```
 
-تست شبکه با چهار network namespace جداگانه، WireGuard واقعی، NAT، TCP/UDP، IPv4/IPv6، ترافیک عبوری، حفظ اتصال ورودی، قطع امن، شروع مجدد و پاک‌سازی کار می‌کند. تست ۳۰۰ درخواست HTTP با ۴۰ worker برای بررسی عملکرد مسیر است؛ **بنچمارک صدها کاربر واقعی نیست**. تست‌ها روی فایروال و مسیرهای اصلی میزبان تغییری نمی‌دهند.
+Integration tests create isolated network namespaces, run real WireGuard and test TCP/UDP, IPv4/IPv6, forwarding, existing/new inbound TCP connections, tunnel failure, restart and cleanup. They do not alter host routes/firewall rules. Root and the installer dependencies are needed; systemd is not needed for the namespace test itself.
 
-این اولین انتشار پروژه است. برای استقرار گسترده ابتدا با کاربران محدود و مصرف واقعی خودتان ارزیابی کنید. پشتیبانی سیستم‌عامل در نصب‌کننده با آزمون ظرفیت روی همهٔ سخت‌افزارها یکسان نیست.
+Private state: `/etc/wg-bridge/state.json` and `/etc/wireguard/wgb-exit.conf`, mode 0600. IP detection/diagnostics contact `api.ipify.org` / `api64.ipify.org`. Do not attach private state or pairing codes to issues.
 
-مجوز [MIT](LICENSE).
+[MIT license](LICENSE).
