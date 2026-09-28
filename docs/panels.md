@@ -61,6 +61,10 @@ Keep the panel API routing first and retain your existing blocking rules. Before
 
 Replace the placeholder tags with the actual tags of your enabled user inbounds. Do not include `api`. Select all desired inbounds in the panel's Routing UI, regardless of their port numbers. The routing `port` field means the **destination port**, not the incoming listener port; do not use it to select users. Remove unused placeholder tags. Save and apply/restart Xray using the panel controls. An earlier matching direct rule will take precedence, so review ordering.
 
+## PasarGuard
+
+Use the [PasarGuard setup guide](pasarguard.md) for node/core selection, a combined outbound/DNS/routing example, applying changes and troubleshooting. [راهنمای فارسی پاسارگارد](pasarguard.fa.md).
+
 ## Other panels / engines
 
 Xray panels that accept custom outbounds and routing can use the same objects. The engine must run in the host network namespace with permission to bind the interface. Docker `network_mode: host` exposes the host interface; a bridged container needs separate integration. Do not point a bridged container at the host's loopback address.

@@ -55,6 +55,8 @@ Route the chosen **user inbound tags** to `wg-out`. Preserve the panel API and b
 
 **[Panel setup, DNS and JSON examples](docs/panels.md)** · **[راهنمای فارسی پنل و DNS](docs/panels.fa.md)**
 
+**PasarGuard:** [English setup guide](docs/pasarguard.md) · [راهنمای فارسی](docs/pasarguard.fa.md)
+
 Other engines can use the tunnel if they support binding an outbound to a source IP or network interface. The guide includes sing-box field names; panel UI support varies. Host services and Docker panels using host networking can access the interface. A panel inside a separate Docker bridge namespace needs additional network integration and is not covered by automatic setup.
 
 This release provides **IPv4 egress**. IPv6 destinations are not forwarded; interface-bound IPv6 is blocked. Existing host IPv6 remains available to unrelated services. There is no direct fallback for traffic correctly bound to the tunnel. Panel rules selecting other outbounds remain the administrator's choice.
