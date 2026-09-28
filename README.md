@@ -10,6 +10,10 @@ WG Bridge configures the link, selective routing, outside NAT and tunnel failure
 
 WireGuard transport defaults to **9999/UDP** on both servers; choose another free UDP port during installation if needed. Panel inbound ports are independent of this transport port.
 
+## Video tutorial (Persian)
+
+[Watch the WG Bridge tutorial on YouTube](https://www.youtube.com/watch?v=UAeH-ErkCGc)
+
 ## Requirements
 
 Ubuntu 22.04/24.04/26.04 LTS (including 26.04.1) or Debian 12/13; root; systemd; a WireGuard-capable kernel; public IPv4 on both hosts. Allow the selected WireGuard UDP port on both provider firewalls. Allow your own panel inbound ports on Iran. Remaining dependencies are installed automatically.
