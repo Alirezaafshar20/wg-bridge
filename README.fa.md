@@ -10,7 +10,9 @@
 
 ## آموزش ویدیویی
 
-[تماشای آموزش WG Bridge در یوتیوب](https://www.youtube.com/watch?v=UAeH-ErkCGc)
+[![آموزش ویدیویی WG Bridge به زبان فارسی](https://i.ytimg.com/vi/UAeH-ErkCGc/maxresdefault.jpg)](https://www.youtube.com/watch?v=UAeH-ErkCGc)
+
+**[▶ تماشای آموزش کامل در یوتیوب](https://www.youtube.com/watch?v=UAeH-ErkCGc)** — برای تماشای ویدیوی فارسی، روی تصویر بالا کلیک کنید.
 
 ## پیش‌نیازها
 

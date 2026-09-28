@@ -12,7 +12,9 @@ WireGuard transport defaults to **9999/UDP** on both servers; choose another fre
 
 ## Video tutorial (Persian)
 
-[Watch the WG Bridge tutorial on YouTube](https://www.youtube.com/watch?v=UAeH-ErkCGc)
+[![Watch the WG Bridge video tutorial (Persian)](https://i.ytimg.com/vi/UAeH-ErkCGc/maxresdefault.jpg)](https://www.youtube.com/watch?v=UAeH-ErkCGc)
+
+**[▶ Watch the full tutorial on YouTube](https://www.youtube.com/watch?v=UAeH-ErkCGc)** — Persian audio. Click the thumbnail to watch.
 
 ## Requirements
 
